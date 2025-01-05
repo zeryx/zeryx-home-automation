@@ -1,4 +1,4 @@
-# Ecobee Boiler Controller
+# Ecobee for Radiators
 
 ## Overview
 This project extends the functionality of an Ecobee thermostat to better handle boiler/radiator heating systems, which have a significant lag time in delivering heat. By integrating with Home Assistant, this script enables more precise control of the Ecobee thermostat for systems using a single-phase boiler.
