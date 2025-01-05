@@ -45,6 +45,20 @@ Update the script with your specific entity IDs:
   - Main floor: `sensor.main_floor_temperature`
   - Thermostat: `sensor.thermostat_current_temperature`
 
+## How to Create a Long-Lived Access Token
+1. Log in to your Home Assistant instance.
+2. Go to your profile by clicking on your username or the user icon in the bottom left corner.
+3. Scroll down to the **Long-Lived Access Tokens** section.
+4. Click on **Create Token**.
+5. Provide a name for the token (e.g., `Boiler Controller`) and click **OK**.
+6. Copy the generated token and save it securely. You will not be able to view it again.
+
+Set the token as an environment variable:
+```bash
+export HOMEKIT_KEY=<your-token-here>
+```
+Add this line to your shell profile file (e.g., `.bashrc` or `.zshrc`) to make it persistent.
+
 ## How to Run
 1. Clone this repository:
    ```bash
@@ -71,8 +85,6 @@ The terminal UI displays:
 - HVAC state and action
 - Recent events log
 
-## Limitations
-- This script assumes a single-phase boiler with significant lag time.
-- Relies on the accuracy and availability of Home Assistant sensors.
-- Author assumes no responsibility for any damages to your ecobee or furnace, make sure to adjust the settings for your own circumstances.
+## Disclaimer
+The author does not assume any responsibility for damages to your furnace, Ecobee, or any other equipment resulting from the use of this software.
 
