@@ -136,13 +136,14 @@ def control_loop():
             # Trap to wait for thermostat to actually trigger as it has a setpoint histeresis
             while hvac_action_cache == "idle":
                hvac_action_cache = get_hvac_action()
+               current_temperature_cache = get_current_temperature()
                add_event("Thermostat is still idle after heat started, probably waiting on setpoint to dip.")
                time.sleep(10)
             add_event("Thermostat is heating, exiting idle catch loop.")
              # Monitor temperature for at least 2 minutes
             initial_temperature = get_current_temperature()
             heating_start_time = time.time()
-            while time.time() - heating_start_time < 120 or (current_temperature_cache is not None and current_temperature_cache <= initial_temperature):
+            while time.time() - heating_start_time < 180 or (current_temperature_cache is not None and current_temperature_cache <= initial_temperature):
                 stop_event.wait(10)  # Check every 10 seconds
                 current_temperature_cache = get_current_temperature()
 
@@ -153,7 +154,7 @@ def control_loop():
                 elapsed_time = int(time.time() - heating_start_time)
                 add_event(f"Heating active for {elapsed_time} seconds. Current temperature: {current_temperature_cache}°C, Initial temperature: {initial_temperature}°C.")
 
-                if current_temperature_cache > initial_temperature and time.time() - heating_start_time >= 120:
+                if current_temperature_cache > initial_temperature and time.time() - heating_start_time >= 180:
                     add_event("Temperature has increased sufficiently. Turning off heat.")
                     set_hvac_mode("off")
                     break
