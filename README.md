@@ -74,10 +74,5 @@ The terminal UI displays:
 ## Limitations
 - This script assumes a single-phase boiler with significant lag time.
 - Relies on the accuracy and availability of Home Assistant sensors.
-
-## Contributing
-Contributions are welcome! Please submit issues or pull requests via the GitHub repository.
-
-## License
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+- Author assumes no responsibility for any damages to your ecobee or furnace, make sure to adjust the settings for your own circumstances.
 
