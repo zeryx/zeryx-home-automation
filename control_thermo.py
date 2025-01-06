@@ -23,8 +23,11 @@ THERMOSTAT_TEMPERATURE_SENSOR = "sensor.thermostat_current_temperature"
 # Default setpoint temperatures
 DEFAULT_TEMPERATURE_SETPOINT = 21.0  # Celsius
 AWAY_TEMPERATURE_SETPOINT = 19.0  # Celsius
+MAX_TEMPERATURE_SETPOINT = 22.5 #Celsius
 TEMPERATURE_SETPOINT = DEFAULT_TEMPERATURE_SETPOINT  # Initial setpoint
 OVERRIDE_SETPOINT = None
+MINIMUM_ON_TIME = 10 #Minutes of minimum furnace on cycle time
+MINIMUM_OFF_TIME = 10 #Minutes of minimum furnace off, after a heating
 
 # Initialize the Home Assistant API client
 service_client = Client(HOME_ASSISTANT_URL, ACCESS_TOKEN)
@@ -111,7 +114,7 @@ def set_hvac_mode(mode):
     global hvac_state
     try:
         service.set_hvac_mode(hvac_mode=mode, entity_id=THERMOSTAT_ENTITY_ID)
-        service.set_temperature(temperature=TEMPERATURE_SETPOINT, entity_id=THERMOSTAT_ENTITY_ID)
+        service.set_temperature(temperature=MAX_TEMPERATURE_SETPOINT, entity_id=THERMOSTAT_ENTITY_ID)
         hvac_state = mode
         add_event(f"Set HVAC mode to {mode} with setpoint {TEMPERATURE_SETPOINT}°C.")
     except Exception as e:
@@ -143,7 +146,7 @@ def control_loop():
              # Monitor temperature for at least 2 minutes
             initial_temperature = get_current_temperature()
             heating_start_time = time.time()
-            while time.time() - heating_start_time < 180 or (current_temperature_cache is not None and current_temperature_cache <= initial_temperature):
+            while time.time() - heating_start_time < MINIMUM_ON_TIME*60:
                 stop_event.wait(10)  # Check every 10 seconds
                 current_temperature_cache = get_current_temperature()
 
@@ -154,14 +157,9 @@ def control_loop():
                 elapsed_time = int(time.time() - heating_start_time)
                 add_event(f"Heating active for {elapsed_time} seconds. Current temperature: {current_temperature_cache}°C, Initial temperature: {initial_temperature}°C.")
 
-                if current_temperature_cache > initial_temperature and time.time() - heating_start_time >= 180:
-                    add_event("Temperature has increased sufficiently. Turning off heat.")
-                    set_hvac_mode("off")
-                    break
-
             # Wait for 3 minutes after heating is turned off
-            add_event("Heating session complete. Waiting for 3 minutes before next control cycle.")
-            stop_event.wait(180)
+            add_event(f"Heating session complete. Waiting for {MINIMUM_OFF_TIME} minutes before next control cycle.")
+            stop_event.wait(MINIMUM_OFF_TIME*60)
         elif current_temperature_cache < TEMPERATURE_SETPOINT:
             add_event("Temperature is at or above setpoint or HVAC not heating. Turning off heat.")
             set_hvac_mode("off")
