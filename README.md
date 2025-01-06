@@ -1,17 +1,16 @@
 # Ecobee for Radiators
 
-![image](https://github.com/user-attachments/assets/3220af93-18db-42d7-8def-5067af5807de)
-
-
-
 ## Overview
 This project extends the functionality of an Ecobee thermostat to better handle boiler/radiator heating systems, which have a significant lag time in delivering heat. By integrating with Home Assistant, this script enables more precise control of the Ecobee thermostat for systems using a single-phase boiler.
 
 ## Features
 - Monitors multiple temperature sensors to calculate an average temperature.
 - Adjusts the setpoint based on occupancy using connected sensors.
-- Handles the Ecobee's behavior of waiting before activating heating to avoid unnecessary cycling.
-- Ensures a 3-minute delay after heating sessions to account for boiler/radiator lag.
+- Implements a learning algorithm to optimize heating cycles:
+  - Dynamically adjusts the heating duration based on the temperature difference between the setpoint and the observed temperature after a cooling period.
+  - Ensures efficient heating by increasing the heating time if the temperature does not reach the setpoint.
+- Configurable minimum and maximum heating cycle durations.
+- Adjustable minimum off time between heating cycles to allow for boiler recovery.
 - Provides a curses-based terminal UI for real-time monitoring and control.
 
 ## Requirements

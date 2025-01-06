@@ -23,11 +23,12 @@ THERMOSTAT_TEMPERATURE_SENSOR = "sensor.thermostat_current_temperature"
 # Default setpoint temperatures
 DEFAULT_TEMPERATURE_SETPOINT = 21.0  # Celsius
 AWAY_TEMPERATURE_SETPOINT = 19.0  # Celsius
-MAX_TEMPERATURE_SETPOINT = 22.5 #Celsius
+MAX_TEMPERATURE_SETPOINT = 22.5  # Celsius
 TEMPERATURE_SETPOINT = DEFAULT_TEMPERATURE_SETPOINT  # Initial setpoint
 OVERRIDE_SETPOINT = None
-MINIMUM_ON_TIME = 10 #Minutes of minimum furnace on cycle time
-MINIMUM_OFF_TIME = 10 #Minutes of minimum furnace off, after a heating
+MINIMUM_ON_TIME = 5  # Minutes of minimum furnace on cycle time
+MAXIMUM_ON_TIME = 15  # Minutes of maximum furnace on cycle time
+OFF_TIME = 15  # Minutes of minimum furnace off, after a heating
 
 # Initialize the Home Assistant API client
 service_client = Client(HOME_ASSISTANT_URL, ACCESS_TOKEN)
@@ -41,6 +42,9 @@ lock = Event()
 hvac_state = "off"
 hvac_action_cache = ""
 current_temperature_cache = None
+
+# Learning variables
+learning_heating_duration = MINIMUM_ON_TIME * 60
 
 def add_event(message):
     """Add an event to the event log."""
@@ -102,13 +106,6 @@ def adjust_setpoint_based_on_occupancy():
             TEMPERATURE_SETPOINT = AWAY_TEMPERATURE_SETPOINT
             add_event("House unoccupied. Using away setpoint.")
 
-def get_hvac_action():
-  client = Client(HOME_ASSISTANT_URL, ACCESS_TOKEN)
-  thermostat_entity = client.get_entity(entity_id=THERMOSTAT_ENTITY_ID)
-  thermostat_state = thermostat_entity.get_state()
-  hvac_action = thermostat_state.attributes["hvac_action"]
-  return hvac_action
-
 def set_hvac_mode(mode):
     """Set the HVAC mode of the thermostat."""
     global hvac_state
@@ -121,11 +118,11 @@ def set_hvac_mode(mode):
         add_event(f"Error setting HVAC mode: {e}")
 
 def control_loop():
-    global current_temperature_cache, hvac_action_cache
+    global current_temperature_cache, hvac_action_cache, learning_heating_duration
+
     while not stop_event.is_set():
         adjust_setpoint_based_on_occupancy()
         current_temperature_cache = get_current_temperature()
-        hvac_action_cache = get_hvac_action()
 
         if current_temperature_cache is None:
             add_event("Unable to retrieve temperature. Retrying in 1 minute.")
@@ -136,33 +133,44 @@ def control_loop():
             add_event("Temperature below setpoint. Turning on heat.")
             set_hvac_mode("heat")
 
-            # Trap to wait for thermostat to actually trigger as it has a setpoint histeresis
-            while hvac_action_cache == "idle":
-               hvac_action_cache = get_hvac_action()
-               current_temperature_cache = get_current_temperature()
-               add_event("Thermostat is still idle after heat started, probably waiting on setpoint to dip.")
-               time.sleep(10)
-            add_event("Thermostat is heating, exiting idle catch loop.")
-             # Monitor temperature for at least 2 minutes
-            initial_temperature = get_current_temperature()
+            initial_temperature = current_temperature_cache
             heating_start_time = time.time()
-            while time.time() - heating_start_time < MINIMUM_ON_TIME*60:
-                stop_event.wait(10)  # Check every 10 seconds
-                current_temperature_cache = get_current_temperature()
 
+            # Keep heating for the learned duration
+            while time.time() - heating_start_time < learning_heating_duration:
+                stop_event.wait(10)
+                current_temperature_cache = get_current_temperature()
                 if current_temperature_cache is None:
                     add_event("Error reading temperature during heating cycle. Continuing...")
                     continue
 
                 elapsed_time = int(time.time() - heating_start_time)
-                add_event(f"Heating active for {elapsed_time} seconds. Current temperature: {current_temperature_cache}°C, Initial temperature: {initial_temperature}°C.")
+                add_event(f"Heating active for {elapsed_time} seconds. Current temperature: {current_temperature_cache}°C.")
 
-            # Wait for 3 minutes after heating is turned off
-            add_event(f"Heating session complete. Waiting for {MINIMUM_OFF_TIME} minutes before next control cycle.")
-            stop_event.wait(MINIMUM_OFF_TIME*60)
-        elif current_temperature_cache < TEMPERATURE_SETPOINT:
-            add_event("Temperature is at or above setpoint or HVAC not heating. Turning off heat.")
+            # Turn off heat and wait minimum off time
+            add_event("Turning off heat after heating session.")
             set_hvac_mode("off")
+            stop_event.wait(OFF_TIME * 60)
+
+            # Measure temperature increase and adjust heating duration
+            post_off_temperature = get_current_temperature()
+            if post_off_temperature is not None:
+                temperature_difference = post_off_temperature - TEMPERATURE_SETPOINT
+                if temperature_difference > 0:
+                    learning_heating_duration = min(
+                        max(MINIMUM_ON_TIME * 60, learning_heating_duration * (TEMPERATURE_SETPOINT / temperature_difference)),
+                        MAXIMUM_ON_TIME * 60
+                    )
+                    add_event(f"Adjusted heating duration to {learning_heating_duration / 60:.2f} minutes.")
+                elif temperature_difference < 0:
+                    learning_heating_duration = min(
+                        learning_heating_duration + (abs(temperature_difference) * 60),
+                        MAXIMUM_ON_TIME * 60
+                    )
+                    add_event(f"Temperature did not reach setpoint after OFF_TIME. Increased heating duration to {learning_heating_duration / 60:.2f} minutes.")
+
+        else:
+            add_event("Temperature is at or above setpoint. No heating needed.")
 
         lock.set()
         stop_event.wait(10)  # Run the control loop every 10 seconds
@@ -188,22 +196,22 @@ def curses_ui(stdscr):
             # Display the current status
             stdscr.addstr(0, 0, f"Current Temperature: {current_temperature_cache if current_temperature_cache is not None else 'N/A'}°C")
             stdscr.addstr(1, 0, f"Setpoint Temperature: {TEMPERATURE_SETPOINT}°C")
-            stdscr.addstr(2, 0, f"Occupancy Status: {'Occupied' if get_occupancy_status() else 'Unoccupied'}")
-            stdscr.addstr(3, 0, f"State: {hvac_state}")
-            stdscr.addstr(4, 0, f"Hvac Action: {hvac_action_cache}")
+            stdscr.addstr(2, 0, f"Learned Cycle Time: {learning_heating_duration / 60:.2f} minutes")
+            stdscr.addstr(3, 0, f"Occupancy Status: {'Occupied' if get_occupancy_status() else 'Unoccupied'}")
+            stdscr.addstr(4, 0, f"State: {hvac_state}")
 
             # Display the event log
-            stdscr.addstr(5, 0, "Event Log:")
+            stdscr.addstr(6, 0, "Event Log:")
             for i, event in enumerate(events[-5:]):
-                stdscr.addstr(6 + i, 0, event)
+                stdscr.addstr(7 + i, 0, event)
 
             # Display the input prompt
-            stdscr.addstr(12, 0, "Commands:")
-            stdscr.addstr(13, 0, "  - 'set <value>': Set a new temperature setpoint (e.g., 'set 22.0').")
-            stdscr.addstr(14, 0, "  - 'set': Clear override and use occupancy system.")
-            stdscr.addstr(15, 0, "  - 'q': Quit the program.")
-            stdscr.addstr(17, 0, "Enter command: ")
-            stdscr.addstr(17, 15, input_buffer)
+            stdscr.addstr(13, 0, "Commands:")
+            stdscr.addstr(14, 0, "  - 'set <value>': Set a new temperature setpoint (e.g., 'set 22.0').")
+            stdscr.addstr(15, 0, "  - 'set': Clear override and use occupancy system.")
+            stdscr.addstr(16, 0, "  - 'q': Quit the program.")
+            stdscr.addstr(18, 0, "Enter command: ")
+            stdscr.addstr(18, 15, input_buffer)
             stdscr.refresh()
 
             last_update_time = current_time
@@ -216,6 +224,7 @@ def curses_ui(stdscr):
                     input_buffer = ""
                     if command == "q":
                         add_event("Exiting thermostat control.")
+                        set_hvac_mode("off")
                         stop_event.set()
                         control_thread.join()
                         break
