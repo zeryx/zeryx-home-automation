@@ -6,7 +6,7 @@ from homeassistant_api import Client
 import curses
 
 # Home Assistant API configuration
-HOME_ASSISTANT_URL = "http://192.168.8.249:8123/api"
+HOME_ASSISTANT_URL = os.environ["HOMEKIT_API_ADDRESS"]
 ACCESS_TOKEN = os.environ["HOMEKIT_KEY"]
 
 # Thermostat and occupancy entity IDs
@@ -55,23 +55,36 @@ def add_event(message):
     lock.set()
 
 def get_current_temperature():
-    """Retrieve the average temperature from multiple sensors."""
+    """Retrieve the average temperature from multiple sensors, considering only fresh data."""
     client = Client(HOME_ASSISTANT_URL, ACCESS_TOKEN)
-    bedroom_temperature_sensor = client.get_entity(entity_id=BEDROOM_TEMPERATURE_SENSOR)
-    main_floor_temperature_sensor = client.get_entity(entity_id=MAIN_FLOOR_TEMPERATURE_SENSOR)
-    thermostat_temperature_sensor = client.get_entity(entity_id=THERMOSTAT_TEMPERATURE_SENSOR)
-    try:
-        bed_state = bedroom_temperature_sensor.get_state()
-        main_floor_state = main_floor_temperature_sensor.get_state()
-        thermostat_state = thermostat_temperature_sensor.get_state()
-        bedroom_temp = float(bed_state.state)
-        main_floor_temp = float(main_floor_state.state)
-        thermostat_temp = float(thermostat_state.state)
-        average_temp = (bedroom_temp + main_floor_temp + thermostat_temp) / 3
-        add_event(f"last updated thermostat: {thermostat_state.last_updated}")
+    temperature_sensors = [
+        BEDROOM_TEMPERATURE_SENSOR,
+        MAIN_FLOOR_TEMPERATURE_SENSOR,
+        THERMOSTAT_TEMPERATURE_SENSOR
+    ]
+
+    fresh_temperatures = []
+    for sensor_id in temperature_sensors:
+        try:
+            sensor = client.get_entity(entity_id=sensor_id)
+            state = sensor.get_state()
+            if isinstance(state.last_updated, str):
+                last_updated = datetime.strptime(state.last_updated, "%Y-%m-%dT%H:%M:%S.%fZ")
+            else:
+                last_updated = state.last_updated
+            if (datetime.utcnow().replace(tzinfo=None) - last_updated.replace(tzinfo=None)).total_seconds() <= 300:  # Within 5 minutes
+                fresh_temperatures.append(float(state.state))
+            else:
+                add_event(f"Sensor {sensor_id} data is stale and ignored.")
+        except Exception as e:
+            add_event(f"Error fetching temperature from {sensor_id}: {e}")
+
+    if fresh_temperatures:
+        average_temp = sum(fresh_temperatures) / len(fresh_temperatures)
+        add_event(f"Calculated average temperature from fresh data: {average_temp:.2f}°C.")
         return average_temp
-    except Exception as e:
-        add_event(f"Error fetching temperatures: {e}")
+    else:
+        add_event("No fresh temperature data available. Unable to calculate average temperature.")
         return None
 
 def get_occupancy_status():
@@ -157,17 +170,20 @@ def control_loop():
             if post_off_temperature is not None:
                 temperature_difference = post_off_temperature - TEMPERATURE_SETPOINT
                 if temperature_difference > 0:
-                    learning_heating_duration = min(
-                        max(MINIMUM_ON_TIME * 60, learning_heating_duration * (TEMPERATURE_SETPOINT / temperature_difference)),
-                        MAXIMUM_ON_TIME * 60
+                    adjustment_factor = max(0.1, min(1.0, temperature_difference / TEMPERATURE_SETPOINT))
+                    learning_heating_duration = max(
+                        MINIMUM_ON_TIME * 60,
+                        learning_heating_duration * (1 - adjustment_factor)
                     )
-                    add_event(f"Adjusted heating duration to {learning_heating_duration / 60:.2f} minutes.")
+                    add_event(f"Overshot setpoint. Adjusted heating duration to {learning_heating_duration / 60:.2f} minutes.")
                 elif temperature_difference < 0:
+                    time_to_heat = time.time() - heating_start_time
+                    adjustment_factor = abs(temperature_difference) / TEMPERATURE_SETPOINT
                     learning_heating_duration = min(
-                        learning_heating_duration + (abs(temperature_difference) * 60),
-                        MAXIMUM_ON_TIME * 60
+                        MAXIMUM_ON_TIME * 60,
+                        learning_heating_duration + (adjustment_factor * time_to_heat)
                     )
-                    add_event(f"Temperature did not reach setpoint after OFF_TIME. Increased heating duration to {learning_heating_duration / 60:.2f} minutes.")
+                    add_event(f"Undershot setpoint. Increased heating duration to {learning_heating_duration / 60:.2f} minutes.")
 
         else:
             add_event("Temperature is at or above setpoint. No heating needed.")
