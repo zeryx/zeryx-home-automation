@@ -28,7 +28,7 @@ TEMPERATURE_SETPOINT = DEFAULT_TEMPERATURE_SETPOINT  # Initial setpoint
 OVERRIDE_SETPOINT = None
 MINIMUM_ON_TIME = 5  # Minutes of minimum furnace on cycle time
 MAXIMUM_ON_TIME = 15  # Minutes of maximum furnace on cycle time
-OFF_TIME = 15  # Minutes of minimum furnace off, after a heating
+OFF_TIME = 25  # Minutes of minimum furnace off, after a heating
 
 # Initialize the Home Assistant API client
 service_client = Client(HOME_ASSISTANT_URL, ACCESS_TOKEN)
