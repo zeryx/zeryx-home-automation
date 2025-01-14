@@ -166,7 +166,6 @@ def control_loop():
             stop_event.wait(OFF_TIME * 60)
 
             # Measure temperature increase and adjust heating duration
-            post_off_temperature = get_current_temperature()
             if post_off_temperature is not None:
                 temperature_difference = post_off_temperature - TEMPERATURE_SETPOINT
                 if temperature_difference > 0:
