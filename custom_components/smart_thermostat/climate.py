@@ -93,8 +93,6 @@ class SmartThermostat(ClimateEntity):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
-        # Force a state update when an action is added
-        self.async_write_ha_state()
         
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
@@ -303,9 +301,6 @@ class SmartThermostat(ClimateEntity):
 
         now = datetime.now()
         
-        # Force more frequent state updates during active periods
-        self.async_write_ha_state()
-        
         # Add status check logging
         self._add_action(f"Current status: {self._cycle_status}, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C")
 
@@ -401,4 +396,6 @@ class SmartThermostat(ClimateEntity):
         """Update the current temperature and control heating."""
         # Update temperature before controlling heating
         self.current_temperature
-        await self._control_heating() 
+        await self._control_heating()
+        # Schedule next update sooner
+        self.async_schedule_update_ha_state(True) 
