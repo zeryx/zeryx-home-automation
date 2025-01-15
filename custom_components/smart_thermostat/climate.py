@@ -69,6 +69,18 @@ class SmartThermostat(ClimateEntity):
         self._action_history = deque(maxlen=50)  # Keep last 50 actions
         self._last_update = datetime.now()
         self._sensor_temperatures = {}
+        
+        # Initialize temperature tracking
+        self._current_temperature = None
+        self._sensor_temperatures = {}
+        
+        # Initialize cycle tracking
+        self._heating_start_time = None
+        self._cooling_start_time = None
+        self._learning_heating_duration = 1800  # 30 minutes default
+        self._off_time = 300  # 5 minutes default
+        self._cycle_status = "initializing"
+        self._time_remaining = 0
 
     def _add_action(self, action: str):
         """Add an action to the history."""
@@ -147,7 +159,7 @@ class SmartThermostat(ClimateEntity):
             return avg_temp
         else:
             self._add_action("No fresh temperature data available")
-            return self._current_temperature
+            return None  # Return None instead of self._current_temperature when no data is available
 
     @property
     def target_temperature(self):
