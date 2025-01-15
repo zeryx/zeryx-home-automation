@@ -3,6 +3,7 @@ from homeassistant.components.climate import (
     ClimateEntity,
     HVACMode,
     ClimateEntityFeature,
+    HVACAction,
 )
 from homeassistant.const import (
     ATTR_TEMPERATURE,
@@ -101,6 +102,15 @@ class SmartThermostat(ClimateEntity):
     def supported_features(self):
         """Return the list of supported features."""
         return ClimateEntityFeature.TARGET_TEMPERATURE
+
+    @property
+    def hvac_action(self):
+        """Return the current running hvac operation."""
+        if self._hvac_mode == HVACMode.OFF:
+            return HVACAction.OFF
+        elif self._is_heating:
+            return HVACAction.HEATING
+        return HVACAction.IDLE
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
