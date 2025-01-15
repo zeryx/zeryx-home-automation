@@ -9,8 +9,9 @@ from homeassistant.const import (
     ATTR_TEMPERATURE,
     UnitOfTemperature,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.restore_state import RestoreEntity
 import logging
 from datetime import datetime, timezone, timedelta
 from collections import deque
@@ -37,7 +38,7 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
         )
     ])
 
-class SmartThermostat(ClimateEntity):
+class SmartThermostat(ClimateEntity, RestoreEntity):
     """Smart Thermostat Climate Entity."""
     
     def __init__(self, hass, name, temp_sensors, hvac_entity,
@@ -52,32 +53,78 @@ class SmartThermostat(ClimateEntity):
         self._tolerance = tolerance
         self._temp_sensors = temp_sensors
         
-        # Temperature state
+        # Initialize with defaults - will be restored from state if available
         self._current_temperature = None
-        
-        # HVAC State
         self._hvac_mode = HVACMode.OFF
         self._hvac_action = HVACAction.OFF
         self._is_heating = False
+        self._heating_start_time = None
+        self._cooling_start_time = None
+        self._learning_heating_duration = 600
+        self._off_time = 300
+        self._time_remaining = 0
+        self._cycle_status = "idle"
         
-        # Add supported features
-        self._attr_supported_features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE
-        )
-        
+        self._attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
         self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
         
-        # Initialize action history
-        self._action_history = deque(maxlen=50)  # Keep last 50 actions
-        self._last_update = datetime.now()
+        self._action_history = deque(maxlen=50)
         self._sensor_temperatures = {}
+
+    async def async_added_to_hass(self):
+        """Handle addition to Home Assistant."""
+        await super().async_added_to_hass()
+
+        # Restore previous state if available
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            # Restore basic climate attributes
+            self._hvac_mode = last_state.state
+            self._target_temperature = last_state.attributes.get(
+                'temperature', self._target_temperature)
+            self._current_temperature = last_state.attributes.get(
+                'current_temperature', None)
+
+            # Restore custom attributes
+            attrs = last_state.attributes
+            self._learning_heating_duration = attrs.get(
+                'learning_duration', 600) * 60  # Convert from minutes to seconds
+            self._off_time = attrs.get('off_time', 300)
+            self._cycle_status = attrs.get('cycle_status', 'idle')
+            self._is_heating = attrs.get('is_heating', False)
+            
+            # Restore timing information if heating was in progress
+            if self._is_heating:
+                time_remaining = attrs.get('time_remaining', 0) * 60  # Convert from minutes to seconds
+                if time_remaining > 0:
+                    now = datetime.now()
+                    self._heating_start_time = now - timedelta(
+                        seconds=(self._learning_heating_duration - time_remaining))
+            
+            self._add_action("State restored from Home Assistant")
+
+        # Set up sensors
+        for sensor_id in self._temp_sensors:
+            self._async_update_temp_sensor(sensor_id)
+
+    @callback
+    def _async_update_temp_sensor(self, entity_id):
+        """Update temperature sensor state callback."""
+        state = self.hass.states.get(entity_id)
+        if state and state.state not in ('unknown', 'unavailable'):
+            try:
+                self._sensor_temperatures[entity_id] = float(state.state)
+            except ValueError:
+                self._add_action(f"Invalid temperature from {entity_id}: {state.state}")
 
     def _add_action(self, action: str):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
-        
+        # Trigger state update when action is added
+        self.async_write_ha_state()
+
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
         state = self._hass.states.get(sensor_id)
