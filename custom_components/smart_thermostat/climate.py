@@ -93,6 +93,8 @@ class SmartThermostat(ClimateEntity):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
+        # Force a state update when an action is added
+        self.async_write_ha_state()
         
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
@@ -161,7 +163,6 @@ class SmartThermostat(ClimateEntity):
             self._sensor_temperatures = fresh_temperatures.copy()
             avg_temp = sum(fresh_temperatures.values()) / len(fresh_temperatures)
             self._current_temperature = avg_temp
-            self._add_action(f"Calculated average temperature: {avg_temp:.1f}°C from {len(fresh_temperatures)} sensors")
             return avg_temp
         else:
             self._add_action("No fresh temperature data available")
@@ -301,6 +302,9 @@ class SmartThermostat(ClimateEntity):
             return
 
         now = datetime.now()
+        
+        # Force more frequent state updates during active periods
+        self.async_write_ha_state()
         
         # Add status check logging
         self._add_action(f"Current status: {self._cycle_status}, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C")

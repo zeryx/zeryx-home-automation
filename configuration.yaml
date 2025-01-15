@@ -5,6 +5,11 @@ automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
 
+homeassistant:
+  customize:
+    climate.smart_thermostat:
+      scan_interval: 10  # Updates every 10 seconds
+
 smartir:
 climate:
   - platform: smartir
