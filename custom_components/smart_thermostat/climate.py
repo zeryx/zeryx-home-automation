@@ -56,8 +56,7 @@ class SmartThermostat(ClimateEntity):
         self._unit = UnitOfTemperature.CELSIUS
         self._is_heating = False
         self._action_history = deque(maxlen=5)
-        self._sensor_temperatures = {}
-        self._sensor_last_update = {}
+        self._sensor_temperatures = {}  # Preserve between updates
         
     def _add_action(self, action: str):
         """Add an action to the history."""
@@ -69,6 +68,8 @@ class SmartThermostat(ClimateEntity):
         state = self._hass.states.get(sensor_id)
         if not state:
             self._add_action(f"Sensor {sensor_id} not found")
+            # Remove from sensor_temperatures if not found
+            self._sensor_temperatures.pop(sensor_id, None)
             return False
             
         try:
@@ -76,16 +77,18 @@ class SmartThermostat(ClimateEntity):
             if isinstance(last_updated, str):
                 last_updated = datetime.strptime(last_updated, "%Y-%m-%dT%H:%M:%S.%f%z")
             
-            # Convert to UTC for comparison
             now = datetime.now(timezone.utc)
             time_diff = (now - last_updated).total_seconds()
             
             if time_diff > 300:  # 5 minutes
                 self._add_action(f"Sensor {sensor_id} data is stale: {time_diff:.1f}s old")
+                # Remove stale data from sensor_temperatures
+                self._sensor_temperatures.pop(sensor_id, None)
                 return False
             return True
         except Exception as e:
             self._add_action(f"Error checking freshness for {sensor_id}: {str(e)}")
+            self._sensor_temperatures.pop(sensor_id, None)
             return False
 
     @property
@@ -110,17 +113,20 @@ class SmartThermostat(ClimateEntity):
                     
                 state = self._hass.states.get(sensor_id)
                 if state and state.state not in ('unknown', 'unavailable'):
-                    temp = float(state.state)
-                    fresh_temperatures.append(temp)
-                    self._sensor_temperatures[sensor_id] = temp
-                    self._add_action(f"Got fresh reading from {sensor_id}: {temp}°C")
+                    try:
+                        temp = float(state.state)
+                        fresh_temperatures.append(temp)
+                        self._sensor_temperatures[sensor_id] = temp
+                        self._add_action(f"Got fresh reading from {sensor_id}: {temp}°C")
+                    except ValueError:
+                        self._add_action(f"Invalid temperature value from {sensor_id}: {state.state}")
+                        self._sensor_temperatures.pop(sensor_id, None)
                 else:
                     self._add_action(f"Invalid state from {sensor_id}: {state.state if state else 'No state'}")
-            except ValueError as e:
-                self._add_action(f"Error reading {sensor_id}: {str(e)}")
-                continue
+                    self._sensor_temperatures.pop(sensor_id, None)
             except Exception as e:
                 self._add_action(f"Unexpected error with {sensor_id}: {str(e)}")
+                self._sensor_temperatures.pop(sensor_id, None)
                 continue
 
         if fresh_temperatures:
@@ -178,7 +184,8 @@ class SmartThermostat(ClimateEntity):
             "action_history": list(self._action_history),
             "sensor_temperatures": self._sensor_temperatures,
             "average_temperature": self._current_temperature,
-            "fresh_sensor_count": len([s for s in self._temp_sensors if self._is_sensor_fresh(s)])
+            "fresh_sensor_count": len(self._sensor_temperatures),
+            "available_sensors": self._temp_sensors
         }
 
     async def async_set_temperature(self, **kwargs):
@@ -235,4 +242,6 @@ class SmartThermostat(ClimateEntity):
 
     async def async_update(self):
         """Update the current temperature and control heating."""
+        # Update temperature before controlling heating
+        self.current_temperature
         await self._control_heating() 
