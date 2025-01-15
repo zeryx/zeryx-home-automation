@@ -82,7 +82,7 @@ class SmartThermostat(ClimateEntity):
         # Initialize cycle tracking
         self._heating_start_time = None
         self._cooling_start_time = None
-        self._learning_heating_duration = maximum_on_time  # Default heating duration
+        self._learning_heating_duration = minimum_on_time  # Default heating duration
         self._minimum_heating_duration = minimum_on_time
         self._maximum_heating_duration = maximum_on_time
         self._off_time = off_time
