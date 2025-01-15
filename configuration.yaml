@@ -1,2 +1,15 @@
 climate:
-  - platform: smart_thermostat 
+  - platform: smart_thermostat
+    name: "Smart Thermostat"
+    temperature_sensors:
+      - sensor.bedroom_temperature
+      - sensor.main_floor_temperature
+      - sensor.thermostat_current_temperature
+    hvac_entity: climate.thermostat
+    target_temp: 21.0
+    min_temp: 19.0
+    max_temp: 22.5
+    tolerance: 0.5
+    minimum_on_time: 5
+    maximum_on_time: 15
+    off_time: 25 
