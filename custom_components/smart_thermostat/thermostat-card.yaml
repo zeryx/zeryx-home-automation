@@ -127,9 +127,9 @@ cards:
   - type: custom:mushroom-template-card
     primary: Recent Actions
     secondary: >
-      {% set history = state_attr('climate.smart_thermostat', 'action_history')[:5] %}
-      {% if history %}
-        {% for action in history %}
+      {% set history = state_attr('climate.smart_thermostat', 'action_history') %}
+      {% if history and history|length > 0 %}
+        {% for action in history[:5] %}
           {{ action }}{% if not loop.last %}<br>{% endif %}
         {% endfor %}
       {% else %}
@@ -138,7 +138,7 @@ cards:
     icon: mdi:history
     layout: vertical
     multiline_secondary: true
-    fill_container: true 
+    fill_container: true
 
   - type: horizontal-stack
     cards:
