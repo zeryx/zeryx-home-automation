@@ -1,12 +1,12 @@
 type: vertical-stack
 cards:
   - type: custom:mushroom-template-card
-    primary: Smart Thermostat Status
+    primary: Smart Furnace Status
     secondary: >
-      {{ states('climate.smart_thermostat') }}
+      {{ states('climate.smart_furnace') }}
     icon: mdi:thermostat
     fill_container: true
-    entity: climate.smart_thermostat
+    entity: climate.smart_furnace
     tap_action:
       action: toggle
     hold_action:
@@ -19,7 +19,7 @@ cards:
       - type: custom:mushroom-template-card
         primary: Bedroom
         secondary: >
-          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% set temps = state_attr('climate.smart_furnace', 'sensor_temperatures') %}
           {% if temps and 'sensor.bedroom_temperature' in temps %}
             {{ temps['sensor.bedroom_temperature'] }}°C
           {% else %}
@@ -30,7 +30,7 @@ cards:
       - type: custom:mushroom-template-card
         primary: Office
         secondary: >
-          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% set temps = state_attr('climate.smart_furnace', 'sensor_temperatures') %}
           {% if temps and 'sensor.office_temperature' in temps %}
             {{ temps['sensor.office_temperature'] }}°C
           {% else %}
@@ -41,7 +41,7 @@ cards:
       - type: custom:mushroom-template-card
         primary: Thermostat
         secondary: >
-          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% set temps = state_attr('climate.smart_furnace', 'sensor_temperatures') %}
           {% if temps and 'sensor.thermostat_current_temperature' in temps %}
             {{ temps['sensor.thermostat_current_temperature'] }}°C
           {% else %}
@@ -52,7 +52,7 @@ cards:
       - type: custom:mushroom-template-card
         primary: HVAC Controller
         secondary: >
-          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% set temps = state_attr('climate.smart_furnace', 'sensor_temperatures') %}
           {% if temps and 'sensor.hvac_controller_temperature' in temps %}
             {{ temps['sensor.hvac_controller_temperature'] }}°C
           {% else %}
@@ -63,9 +63,9 @@ cards:
       - type: custom:mushroom-template-card
         primary: Average
         secondary: >
-          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% set temps = state_attr('climate.smart_furnace', 'sensor_temperatures') %}
           {% if temps %}
-            {% set avg = state_attr('climate.smart_thermostat', 'average_temperature') %}
+            {% set avg = state_attr('climate.smart_furnace', 'average_temperature') %}
             {{ avg|round(1) }}°C
           {% else %}
             No data
@@ -73,7 +73,7 @@ cards:
         icon: mdi:thermometer-lines
 
   - type: custom:mushroom-climate-card
-    entity: climate.smart_thermostat
+    entity: climate.smart_furnace
     fill_container: true
     show_temperature_control: true
     hvac_modes:
@@ -104,21 +104,21 @@ cards:
       - type: custom:mushroom-template-card
         primary: HVAC Status
         secondary: >
-          {% if states('climate.smart_thermostat') == 'off' %}
+          {% if states('climate.smart_furnace') == 'off' %}
             Off
-          {% elif states('climate.smart_thermostat') == 'heat' %}
-            {% if state_attr('climate.smart_thermostat', 'hvac_action') == 'heating' %}
+          {% elif states('climate.smart_furnace') == 'heat' %}
+            {% if state_attr('climate.smart_furnace', 'hvac_action') == 'heating' %}
               Heating
             {% else %}
               Idle
             {% endif %}
           {% else %}
-            {{ states('climate.smart_thermostat') }}
+            {{ states('climate.smart_furnace') }}
           {% endif %}
         icon: >
-          {% if states('climate.smart_thermostat') == 'heat' and state_attr('climate.smart_thermostat', 'hvac_action') == 'heating' %}
+          {% if states('climate.smart_furnace') == 'heat' and state_attr('climate.smart_furnace', 'hvac_action') == 'heating' %}
             mdi:fire
-          {% elif states('climate.smart_thermostat') == 'heat' %}
+          {% elif states('climate.smart_furnace') == 'heat' %}
             mdi:thermostat
           {% else %}
             mdi:hvac-off
@@ -127,7 +127,7 @@ cards:
   - type: custom:mushroom-template-card
     primary: Recent Actions
     secondary: >
-      {% set history = state_attr('climate.smart_thermostat', 'action_history') %}
+      {% set history = state_attr('climate.smart_furnace', 'action_history') %}
       {% if history and history|length > 0 %}
         {% for action in history[:5] %}
           {{ action }}{% if not loop.last %}<br>{% endif %}
@@ -145,16 +145,16 @@ cards:
       - type: custom:mushroom-template-card
         primary: Cycle Status
         secondary: >
-          {% set status = state_attr('climate.smart_thermostat', 'cycle_status') %}
-          {% set type = state_attr('climate.smart_thermostat', 'cycle_type') %}
-          {% set remaining = state_attr('climate.smart_thermostat', 'time_remaining') %}
+          {% set status = state_attr('climate.smart_furnace', 'cycle_status') %}
+          {% set type = state_attr('climate.smart_furnace', 'cycle_type') %}
+          {% set remaining = state_attr('climate.smart_furnace', 'time_remaining') %}
           {% if type != 'idle' %}
             {{ type|title }} cycle: {{ remaining }}m remaining
           {% else %}
             Idle
           {% endif %}
         icon: >
-          {% set type = state_attr('climate.smart_thermostat', 'cycle_type') %}
+          {% set type = state_attr('climate.smart_furnace', 'cycle_type') %}
           {% if type == 'heating' %}
             mdi:fire-circle
           {% elif type == 'cooling' %}
@@ -166,7 +166,7 @@ cards:
       - type: custom:mushroom-template-card
         primary: Learning Duration
         secondary: >
-          {% set duration = state_attr('climate.smart_thermostat', 'learning_duration') %}
+          {% set duration = state_attr('climate.smart_furnace', 'learning_duration') %}
           {% if duration %}
             {{ duration }}m
           {% else %}

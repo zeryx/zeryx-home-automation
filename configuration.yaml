@@ -1,4 +1,3 @@
-
 smartir:
 
 climate:
@@ -11,7 +10,7 @@ climate:
     humidity_sensor: sensor.hvac_controller_humidity
     power_sensor: binary_sensor.ac_power
   - platform: smart_thermostat
-    name: "Furnace"
+    name: "Smart Furnace"
     temperature_sensors:
       - sensor.bedroom_temperature
       - sensor.office_temperature
