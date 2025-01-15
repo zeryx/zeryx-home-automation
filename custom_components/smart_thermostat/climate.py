@@ -65,7 +65,7 @@ class SmartThermostat(ClimateEntity):
         )
         
         self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
-        self._attr_temperature_unit = "C"
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def _add_action(self, action: str):
         """Add an action to the history."""
