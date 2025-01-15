@@ -269,12 +269,12 @@ class SmartThermostat(ClimateEntity):
                         'hvac_mode': 'heat'
                     }
                 )
-                # Set temperature to 23°C when turning on (Ecobee override)
+                # Set temperature to max_temp when turning on (Ecobee override)
                 await self._hass.services.async_call(
                     'climate', 'set_temperature',
                     {
                         'entity_id': self._hvac_entity,
-                        'temperature': 23.0  # Fixed temperature for Ecobee
+                        'temperature': self._max_temp  # Changed from fixed 23.0 to max_temp
                     }
                 )
                 
@@ -356,7 +356,7 @@ class SmartThermostat(ClimateEntity):
             )
             await self._hass.services.async_call(
                 'climate', 'set_temperature',
-                {'entity_id': self._hvac_entity, 'temperature': self._target_temperature}
+                {'entity_id': self._hvac_entity, 'temperature': self._max_temp}  # Changed from _target_temperature to _max_temp
             )
             self._is_heating = True
             self._heating_start_time = now
