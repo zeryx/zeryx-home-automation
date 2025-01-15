@@ -105,3 +105,19 @@ cards:
           {% else %}
             mdi:hvac-off
           {% endif %} 
+
+  - type: custom:mushroom-template-card
+    primary: Recent Actions
+    secondary: >
+      {% set history = state_attr('climate.thermostat', 'action_history') %}
+      {% if history %}
+        {% for action in history %}
+          {{ action }}{% if not loop.last %}<br>{% endif %}
+        {% endfor %}
+      {% else %}
+        No actions recorded
+      {% endif %}
+    icon: mdi:history
+    layout: vertical
+    multiline_secondary: true
+    fill_container: true 

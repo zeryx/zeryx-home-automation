@@ -12,6 +12,8 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 import logging
+from datetime import datetime
+from collections import deque
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +55,13 @@ class SmartThermostat(ClimateEntity):
         self._current_temperature = None
         self._unit = UnitOfTemperature.CELSIUS
         self._is_heating = False
-
+        self._action_history = deque(maxlen=5)  # Stores last 5 actions
+        
+    def _add_action(self, action: str):
+        """Add an action to the history."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self._action_history.appendleft(f"[{timestamp}] {action}")
+        
     @property
     def name(self):
         """Return the name of the thermostat."""
@@ -112,16 +120,25 @@ class SmartThermostat(ClimateEntity):
             return HVACAction.HEATING
         return HVACAction.IDLE
 
+    @property
+    def extra_state_attributes(self):
+        """Return entity specific state attributes."""
+        return {
+            "action_history": list(self._action_history)
+        }
+
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
         if (temp := kwargs.get(ATTR_TEMPERATURE)) is not None:
             self._target_temperature = temp
+            self._add_action(f"Set temperature to {temp}°C")
             await self._control_heating()
             self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set new target operation mode."""
         self._hvac_mode = hvac_mode
+        self._add_action(f"Set mode to {hvac_mode}")
         if hvac_mode == HVACMode.OFF:
             # Turn off heater
             if self._heater_switch:
@@ -142,6 +159,7 @@ class SmartThermostat(ClimateEntity):
 
         current_temp = self.current_temperature
         if current_temp is None:
+            self._add_action("No temperature reading available")
             return
 
         if current_temp < (self._target_temperature - self._tolerance):
@@ -151,6 +169,7 @@ class SmartThermostat(ClimateEntity):
                     {'entity_id': self._heater_switch}
                 )
                 self._is_heating = True
+                self._add_action(f"Started heating at {current_temp}°C")
         elif current_temp > (self._target_temperature + self._tolerance):
             if self._is_heating:
                 await self._hass.services.async_call(
@@ -158,6 +177,7 @@ class SmartThermostat(ClimateEntity):
                     {'entity_id': self._heater_switch}
                 )
                 self._is_heating = False
+                self._add_action(f"Stopped heating at {current_temp}°C")
 
     async def async_update(self):
         """Update the current temperature and control heating."""
