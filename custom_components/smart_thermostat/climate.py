@@ -104,7 +104,7 @@ class SmartThermostat(ClimateEntity):
     @property
     def current_temperature(self):
         """Return the average current temperature from fresh sensors only."""
-        fresh_temperatures = []
+        fresh_temperatures = {}  # Use dictionary to track both temp and source
         
         for sensor_id in self._temp_sensors:
             try:
@@ -115,22 +115,21 @@ class SmartThermostat(ClimateEntity):
                 if state and state.state not in ('unknown', 'unavailable'):
                     try:
                         temp = float(state.state)
-                        fresh_temperatures.append(temp)
-                        self._sensor_temperatures[sensor_id] = temp
+                        fresh_temperatures[sensor_id] = temp
                         self._add_action(f"Got fresh reading from {sensor_id}: {temp}°C")
                     except ValueError:
                         self._add_action(f"Invalid temperature value from {sensor_id}: {state.state}")
-                        self._sensor_temperatures.pop(sensor_id, None)
+                        continue
                 else:
                     self._add_action(f"Invalid state from {sensor_id}: {state.state if state else 'No state'}")
-                    self._sensor_temperatures.pop(sensor_id, None)
             except Exception as e:
                 self._add_action(f"Unexpected error with {sensor_id}: {str(e)}")
-                self._sensor_temperatures.pop(sensor_id, None)
                 continue
 
         if fresh_temperatures:
-            avg_temp = sum(fresh_temperatures) / len(fresh_temperatures)
+            # Update the sensor_temperatures dictionary
+            self._sensor_temperatures = fresh_temperatures.copy()
+            avg_temp = sum(fresh_temperatures.values()) / len(fresh_temperatures)
             self._current_temperature = avg_temp
             self._add_action(f"Calculated average temperature: {avg_temp:.1f}°C from {len(fresh_temperatures)} sensors")
             return avg_temp
@@ -185,7 +184,8 @@ class SmartThermostat(ClimateEntity):
             "sensor_temperatures": self._sensor_temperatures,
             "average_temperature": self._current_temperature,
             "fresh_sensor_count": len(self._sensor_temperatures),
-            "available_sensors": self._temp_sensors
+            "available_sensors": self._temp_sensors,
+            "last_update": datetime.now().strftime("%H:%M:%S")
         }
 
     async def async_set_temperature(self, **kwargs):
