@@ -59,13 +59,16 @@ class SmartThermostat(ClimateEntity):
         
         # Add supported features
         self._attr_supported_features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE |
-            ClimateEntityFeature.TURN_ON |
-            ClimateEntityFeature.TURN_OFF
+            ClimateEntityFeature.TARGET_TEMPERATURE
         )
         
         self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
+        
+        # Initialize action history
+        self._action_history = deque(maxlen=50)  # Keep last 50 actions
+        self._last_update = datetime.now()
+        self._sensor_temperatures = {}
 
     def _add_action(self, action: str):
         """Add an action to the history."""
