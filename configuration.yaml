@@ -3,7 +3,7 @@ smartir:
 
 climate:
   - platform: smartir
-    name: Office AC
+    name: "Heat pump"
     unique_id: kitchen_heat_pump
     device_code: 2161
     controller_data: remote.hvac_controller
@@ -11,7 +11,7 @@ climate:
     humidity_sensor: sensor.hvac_controller_humidity
     power_sensor: binary_sensor.ac_power
   - platform: smart_thermostat
-    name: "Smart Thermostat"
+    name: "Furnace"
     temperature_sensors:
       - sensor.bedroom_temperature
       - sensor.office_temperature
