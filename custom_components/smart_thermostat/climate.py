@@ -12,7 +12,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import deque
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ DEFAULT_NAME = "Smart Thermostat"
 async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_add_entities, discovery_info=None):
     """Set up the smart thermostat platform."""
     name = config.get("name", DEFAULT_NAME)
-    temp_sensor = config.get("temperature_sensor")
+    temp_sensors = config.get("temperature_sensors", [])  # Get list of sensors
     heater_switch = config.get("heater")
     min_temp = config.get("min_temp", 16)
     max_temp = config.get("max_temp", 25)
@@ -32,7 +32,7 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
 
     async_add_entities([
         SmartThermostat(
-            hass, name, temp_sensor, heater_switch,
+            hass, name, temp_sensors, heater_switch,
             min_temp, max_temp, target_temp, tolerance
         )
     ])
@@ -40,12 +40,12 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
 class SmartThermostat(ClimateEntity):
     """Smart Thermostat Climate Entity."""
     
-    def __init__(self, hass, name, temp_sensor, heater_switch,
+    def __init__(self, hass, name, temp_sensors, heater_switch,
                  min_temp, max_temp, target_temp, tolerance):
         """Initialize the thermostat."""
         self._hass = hass
         self._name = name
-        self._temp_sensor = temp_sensor
+        self._temp_sensors = temp_sensors
         self._heater_switch = heater_switch
         self._min_temp = min_temp
         self._max_temp = max_temp
@@ -55,13 +55,39 @@ class SmartThermostat(ClimateEntity):
         self._current_temperature = None
         self._unit = UnitOfTemperature.CELSIUS
         self._is_heating = False
-        self._action_history = deque(maxlen=5)  # Stores last 5 actions
+        self._action_history = deque(maxlen=5)
+        self._sensor_temperatures = {}
+        self._sensor_last_update = {}
         
     def _add_action(self, action: str):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
         
+    def _is_sensor_fresh(self, sensor_id: str) -> bool:
+        """Check if sensor data is fresh (within last 5 minutes)."""
+        state = self._hass.states.get(sensor_id)
+        if not state:
+            self._add_action(f"Sensor {sensor_id} not found")
+            return False
+            
+        try:
+            last_updated = state.last_updated
+            if isinstance(last_updated, str):
+                last_updated = datetime.strptime(last_updated, "%Y-%m-%dT%H:%M:%S.%f%z")
+            
+            # Convert to UTC for comparison
+            now = datetime.now(timezone.utc)
+            time_diff = (now - last_updated).total_seconds()
+            
+            if time_diff > 300:  # 5 minutes
+                self._add_action(f"Sensor {sensor_id} data is stale: {time_diff:.1f}s old")
+                return False
+            return True
+        except Exception as e:
+            self._add_action(f"Error checking freshness for {sensor_id}: {str(e)}")
+            return False
+
     @property
     def name(self):
         """Return the name of the thermostat."""
@@ -74,12 +100,37 @@ class SmartThermostat(ClimateEntity):
 
     @property
     def current_temperature(self):
-        """Return the current temperature."""
-        if self._temp_sensor:
-            state = self._hass.states.get(self._temp_sensor)
-            if state and state.state not in ('unknown', 'unavailable'):
-                self._current_temperature = float(state.state)
-        return self._current_temperature
+        """Return the average current temperature from fresh sensors only."""
+        fresh_temperatures = []
+        
+        for sensor_id in self._temp_sensors:
+            try:
+                if not self._is_sensor_fresh(sensor_id):
+                    continue
+                    
+                state = self._hass.states.get(sensor_id)
+                if state and state.state not in ('unknown', 'unavailable'):
+                    temp = float(state.state)
+                    fresh_temperatures.append(temp)
+                    self._sensor_temperatures[sensor_id] = temp
+                    self._add_action(f"Got fresh reading from {sensor_id}: {temp}°C")
+                else:
+                    self._add_action(f"Invalid state from {sensor_id}: {state.state if state else 'No state'}")
+            except ValueError as e:
+                self._add_action(f"Error reading {sensor_id}: {str(e)}")
+                continue
+            except Exception as e:
+                self._add_action(f"Unexpected error with {sensor_id}: {str(e)}")
+                continue
+
+        if fresh_temperatures:
+            avg_temp = sum(fresh_temperatures) / len(fresh_temperatures)
+            self._current_temperature = avg_temp
+            self._add_action(f"Calculated average temperature: {avg_temp:.1f}°C from {len(fresh_temperatures)} sensors")
+            return avg_temp
+        else:
+            self._add_action("No fresh temperature data available")
+            return self._current_temperature
 
     @property
     def target_temperature(self):
@@ -124,7 +175,10 @@ class SmartThermostat(ClimateEntity):
     def extra_state_attributes(self):
         """Return entity specific state attributes."""
         return {
-            "action_history": list(self._action_history)
+            "action_history": list(self._action_history),
+            "sensor_temperatures": self._sensor_temperatures,
+            "average_temperature": self._current_temperature,
+            "fresh_sensor_count": len([s for s in self._temp_sensors if self._is_sensor_fresh(s)])
         }
 
     async def async_set_temperature(self, **kwargs):

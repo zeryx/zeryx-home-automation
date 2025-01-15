@@ -19,38 +19,44 @@ cards:
       - type: custom:mushroom-template-card
         primary: Bedroom
         secondary: >
-          {{ states('sensor.bedroom_temperature') }}°C
+          {% set temp = states('sensor.bedroom_temperature') %}
+          {% if temp not in ['unknown', 'unavailable'] %}
+            {{ temp }}°C
+          {% else %}
+            No data
+          {% endif %}
         icon: mdi:thermometer
         
       - type: custom:mushroom-template-card
         primary: Main Floor
         secondary: >
-          {{ states('sensor.main_floor_temperature') }}°C
+          {% set temp = states('sensor.main_floor_temperature') %}
+          {% if temp not in ['unknown', 'unavailable'] %}
+            {{ temp }}°C
+          {% else %}
+            No data
+          {% endif %}
         icon: mdi:thermometer
         
       - type: custom:mushroom-template-card
         primary: Thermostat
         secondary: >
-          {{ states('sensor.thermostat_current_temperature') }}°C
+          {% set temp = states('sensor.thermostat_current_temperature') %}
+          {% if temp not in ['unknown', 'unavailable'] %}
+            {{ temp }}°C
+          {% else %}
+            No data
+          {% endif %}
         icon: mdi:thermometer
         
       - type: custom:mushroom-template-card
         primary: Average
         secondary: >
-          {% set temps = [] %}
-          {% for sensor in [
-            states('sensor.bedroom_temperature'),
-            states('sensor.main_floor_temperature'),
-            states('sensor.thermostat_current_temperature')
-          ] %}
-            {% if sensor != 'unknown' and sensor != 'unavailable' %}
-              {% set temps = temps + [sensor|float] %}
-            {% endif %}
-          {% endfor %}
-          {% if temps|length > 0 %}
-            {{ (temps|sum / temps|length)|round(1) }}°C
+          {% set temps = state_attr('climate.thermostat', 'sensor_temperatures') %}
+          {% if temps %}
+            {{ state_attr('climate.thermostat', 'average_temperature')|round(1) }}°C
           {% else %}
-            unknown°C
+            Calculating...
           {% endif %}
         icon: mdi:thermometer-lines
 
