@@ -86,18 +86,18 @@ class SmartThermostat(ClimateEntity):
         self._cycle_status = "idle"
 
     def _add_action(self, action: str) -> None:
-        """Add a new action to the action log."""
+        """Add a new action to the action log without triggering updates."""
         timestamp = dt_util.utcnow()
         self._action_history.appendleft((timestamp, action))
         if len(self._action_history) > self.MAX_ACTIONS:
             self._action_history.popleft()
-        # Remove the state update from here
         _LOGGER.debug("Action added: %s", action)
 
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
-        """Check if the sensor data is fresh."""
-        if sensor_id not in self._sensor_temperatures:
-            # Instead of adding an action, just return False
+        """Check if sensor data is fresh without triggering updates."""
+        state = self.hass.states.get(sensor_id)
+        if state is None:
+            _LOGGER.warning("Sensor %s not found", sensor_id)
             return False
         return True
 
@@ -114,33 +114,22 @@ class SmartThermostat(ClimateEntity):
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        try:
-            # Get valid temperatures from sensors
-            valid_temps = []
-            for sensor_id in self._temp_sensors:
-                state = self.hass.states.get(sensor_id)
-                if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                    self._add_action(f"Sensor {sensor_id} unavailable")
-                    continue
-                    
-                try:
-                    temp = float(state.state)
-                    valid_temps.append(temp)
-                except ValueError:
-                    self._add_action(f"Invalid reading from {sensor_id}: {state.state}")
-                    continue
-
-            if not valid_temps:
-                self._add_action("No valid temperature readings")
-                return None
-
-            # Calculate average of valid temperatures
-            avg_temp = sum(valid_temps) / len(valid_temps)
-            return round(avg_temp, 1)
-
-        except Exception as ex:
-            _LOGGER.error("Error getting temperature: %s", ex)
+        # Use a guard to prevent recursive updates
+        if getattr(self, '_updating_temperature', False):
             return None
+        
+        try:
+            self._updating_temperature = True
+            for sensor_id in self._temp_sensors:
+                if self._is_sensor_fresh(sensor_id):
+                    state = self.hass.states.get(sensor_id)
+                    try:
+                        return float(state.state)
+                    except (ValueError, TypeError):
+                        continue
+            return None
+        finally:
+            self._updating_temperature = False
 
     @property
     def target_temperature(self):
