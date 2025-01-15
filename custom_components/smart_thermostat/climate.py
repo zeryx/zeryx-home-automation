@@ -29,11 +29,15 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
     max_temp = config.get("max_temp", 25)
     target_temp = config.get("target_temp", 20)
     tolerance = config.get("tolerance", 0.5)
+    minimum_on_time = config.get("minimum_on_time", 5) * 60  # Convert to seconds
+    maximum_on_time = config.get("maximum_on_time", 30) * 60  # Convert to seconds
+    off_time = config.get("off_time", 20) * 60  # Convert to seconds
 
     async_add_entities([
         SmartThermostat(
             hass, name, temp_sensors, hvac_entity,
-            min_temp, max_temp, target_temp, tolerance
+            min_temp, max_temp, target_temp, tolerance,
+            minimum_on_time, maximum_on_time, off_time
         )
     ])
 
@@ -41,7 +45,8 @@ class SmartThermostat(ClimateEntity):
     """Smart Thermostat Climate Entity."""
     
     def __init__(self, hass, name, temp_sensors, hvac_entity,
-                 min_temp, max_temp, target_temp, tolerance):
+                 min_temp, max_temp, target_temp, tolerance,
+                 minimum_on_time, maximum_on_time, off_time):
         """Initialize the thermostat."""
         self._hass = hass
         self._name = name
@@ -77,8 +82,10 @@ class SmartThermostat(ClimateEntity):
         # Initialize cycle tracking
         self._heating_start_time = None
         self._cooling_start_time = None
-        self._learning_heating_duration = 1800  # 30 minutes default
-        self._off_time = 300  # 5 minutes default
+        self._learning_heating_duration = maximum_on_time  # Default heating duration
+        self._minimum_heating_duration = minimum_on_time
+        self._maximum_heating_duration = maximum_on_time
+        self._off_time = off_time
         self._cycle_status = "initializing"
         self._time_remaining = 0
 
