@@ -300,25 +300,56 @@ class SmartThermostat(ClimateEntity):
 
         now = datetime.now()
 
-        # Control the underlying climate entity
+        # Check if heating cycle is complete
+        if self._heating_start_time and self._is_heating:
+            heating_elapsed = (now - self._heating_start_time).total_seconds()
+            if heating_elapsed >= self._learning_heating_duration:
+                await self._hass.services.async_call(
+                    'climate', 'set_hvac_mode',
+                    {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
+                )
+                self._is_heating = False
+                
+                # Adjust next cycle duration based on how close we got to target
+                temp_diff = self._target_temperature - current_temp
+                
+                # Calculate adjustment proportional to temperature difference
+                # Each degree of difference adjusts by 2 minutes (120 seconds)
+                adjustment = abs(temp_diff) * 120
+                
+                if temp_diff > 0:  # We undershot
+                    new_duration = min(
+                        self._learning_heating_duration + adjustment,
+                        self._maximum_heating_duration
+                    )
+                    if new_duration != self._learning_heating_duration:
+                        self._add_action(f"Undershot by {temp_diff:.1f}°C - Increasing duration to {new_duration/60:.1f}min (was {self._learning_heating_duration/60:.1f}min)")
+                        self._learning_heating_duration = new_duration
+                elif temp_diff < 0:  # We overshot
+                    new_duration = max(
+                        self._learning_heating_duration - adjustment,
+                        self._minimum_heating_duration
+                    )
+                    if new_duration != self._learning_heating_duration:
+                        self._add_action(f"Overshot by {abs(temp_diff):.1f}°C - Decreasing duration to {new_duration/60:.1f}min (was {self._learning_heating_duration/60:.1f}min)")
+                        self._learning_heating_duration = new_duration
+                
+                self._add_action(f"Completed heating cycle, reached {current_temp:.1f}°C")
+                return
+
+        # Start new heating cycle if needed
         if current_temp < (self._target_temperature - self._tolerance) and not self._is_heating:
             await self._hass.services.async_call(
                 'climate', 'set_hvac_mode',
-                {
-                    'entity_id': self._hvac_entity,
-                    'hvac_mode': 'heat'
-                }
+                {'entity_id': self._hvac_entity, 'hvac_mode': 'heat'}
             )
             await self._hass.services.async_call(
                 'climate', 'set_temperature',
-                {
-                    'entity_id': self._hvac_entity,
-                    'temperature': self._target_temperature
-                }
+                {'entity_id': self._hvac_entity, 'temperature': self._target_temperature}
             )
             self._is_heating = True
             self._heating_start_time = now
-            self._add_action(f"Started heating cycle at {current_temp}°C targeting {self._target_temperature}°C")
+            self._add_action(f"Started heating cycle at {current_temp:.1f}°C targeting {self._target_temperature}°C for {self._learning_heating_duration/60:.1f}min")
 
     async def async_update(self):
         """Update the current temperature and control heating."""
