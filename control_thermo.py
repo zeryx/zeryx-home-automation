@@ -11,13 +11,13 @@ ACCESS_TOKEN = os.environ["HOMEKIT_KEY"]
 
 # Thermostat and occupancy entity IDs
 THERMOSTAT_ENTITY_ID = "climate.thermostat"
-MAIN_FLOOR_OCCUPANCY_SENSOR = "binary_sensor.main_floor_occupancy"
+OFFICE_OCCUPANCY_SENSOR = "binary_sensor.office_occupancy"
 THERMOSTAT_OCCUPANCY_SENSOR = "binary_sensor.thermostat_occupancy"
 BEDROOM_OCCUPANCY_SENSOR = "binary_sensor.bedroom_occupancy"
 
 # Temperature sensors
 BEDROOM_TEMPERATURE_SENSOR = "sensor.bedroom_temperature"
-MAIN_FLOOR_TEMPERATURE_SENSOR = "sensor.main_floor_temperature"
+OFFICE_TEMPERATURE_SENSOR = "sensor.office_temperature"
 THERMOSTAT_TEMPERATURE_SENSOR = "sensor.thermostat_current_temperature"
 
 # Default setpoint temperatures
@@ -59,7 +59,7 @@ def get_current_temperature():
     client = Client(HOME_ASSISTANT_URL, ACCESS_TOKEN)
     temperature_sensors = [
         BEDROOM_TEMPERATURE_SENSOR,
-        MAIN_FLOOR_TEMPERATURE_SENSOR,
+        OFFICE_TEMPERATURE_SENSOR,
         THERMOSTAT_TEMPERATURE_SENSOR
     ]
 
@@ -91,16 +91,16 @@ def get_occupancy_status():
     """Check if the house is occupied based on occupancy sensors."""
     client = Client(HOME_ASSISTANT_URL, ACCESS_TOKEN)
     thermo_occupancy_sensor = client.get_entity(entity_id=THERMOSTAT_OCCUPANCY_SENSOR)
-    main_floor_occupancy_sensor = client.get_entity(entity_id=MAIN_FLOOR_OCCUPANCY_SENSOR)
+    office_occupancy_sensor = client.get_entity(entity_id=OFFICE_OCCUPANCY_SENSOR)
     bed_room_occupancy_sensor = client.get_entity(entity_id=BEDROOM_OCCUPANCY_SENSOR)
     try:
-        main_floor_state = main_floor_occupancy_sensor.get_state()
-        main_floor_state = main_floor_state.state == "on"
+        office_state = office_occupancy_sensor.get_state()
+        office_state = office_state.state == "on"
         thermostat_occupancy_state = thermo_occupancy_sensor.get_state()
         thermostat_occupancy_state = thermostat_occupancy_state.state == "on"
         bedroom_occupancy_state = bed_room_occupancy_sensor.get_state()
         bedroom_occupancy_state = bedroom_occupancy_state.state == "on"
-        occupancy_status = main_floor_state or thermostat_occupancy_state or bedroom_occupancy_state
+        occupancy_status = office_state or thermostat_occupancy_state or bedroom_occupancy_state
         return occupancy_status
     except Exception as e:
         add_event(f"Error checking occupancy status: {e}")
