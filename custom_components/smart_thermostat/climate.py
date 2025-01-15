@@ -40,32 +40,33 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
 class SmartThermostat(ClimateEntity):
     """Smart Thermostat Climate Entity."""
     
-    def __init__(self, hass, name, temp_sensors, heater_switch,
+    def __init__(self, hass, name, temp_sensors, hvac_entity,
                  min_temp, max_temp, target_temp, tolerance):
         """Initialize the thermostat."""
         self._hass = hass
         self._name = name
-        self._temp_sensors = temp_sensors
-        self._heater_switch = heater_switch
+        self._hvac_entity = hvac_entity
         self._min_temp = min_temp
         self._max_temp = max_temp
         self._target_temperature = target_temp
         self._tolerance = tolerance
-        self._hvac_mode = HVACMode.OFF
-        self._current_temperature = None
-        self._unit = UnitOfTemperature.CELSIUS
-        self._is_heating = False
-        self._action_history = deque(maxlen=5)
-        self._sensor_temperatures = {}  # Preserve between updates
-        self._learning_heating_duration = 300  # Start with 5 minutes (300 seconds)
-        self._heating_start_time = None
-        self._cooling_start_time = None
-        self._minimum_on_time = 300  # 5 minutes in seconds
-        self._maximum_on_time = 900  # 15 minutes in seconds
-        self._off_time = 1500  # 25 minutes in seconds
-        self._cycle_status = "idle"
-        self._time_remaining = 0
+        self._temp_sensors = temp_sensors
         
+        # HVAC State
+        self._hvac_mode = HVACMode.OFF
+        self._hvac_action = HVACAction.OFF
+        self._is_heating = False
+        
+        # Add supported features
+        self._attr_supported_features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE |
+            ClimateEntityFeature.TURN_ON |
+            ClimateEntityFeature.TURN_OFF
+        )
+        
+        self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
+        self._attr_temperature_unit = "C"
+
     def _add_action(self, action: str):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -107,7 +108,7 @@ class SmartThermostat(ClimateEntity):
     @property
     def temperature_unit(self):
         """Return the unit of measurement."""
-        return self._unit
+        return self._attr_temperature_unit
 
     @property
     def current_temperature(self):
@@ -151,14 +152,14 @@ class SmartThermostat(ClimateEntity):
         return self._target_temperature
 
     @property
-    def hvac_mode(self):
-        """Return current operation."""
+    def hvac_mode(self) -> HVACMode:
+        """Return hvac operation ie. heat, cool mode."""
         return self._hvac_mode
 
     @property
-    def hvac_modes(self):
-        """Return the list of available operation modes."""
-        return [HVACMode.OFF, HVACMode.HEAT]
+    def hvac_modes(self) -> list[HVACMode]:
+        """Return the list of available hvac operation modes."""
+        return self._attr_hvac_modes
 
     @property
     def min_temp(self):
@@ -173,16 +174,12 @@ class SmartThermostat(ClimateEntity):
     @property
     def supported_features(self):
         """Return the list of supported features."""
-        return ClimateEntityFeature.TARGET_TEMPERATURE
+        return self._attr_supported_features
 
     @property
-    def hvac_action(self):
+    def hvac_action(self) -> HVACAction:
         """Return the current running hvac operation."""
-        if self._hvac_mode == HVACMode.OFF:
-            return HVACAction.OFF
-        elif self._is_heating:
-            return HVACAction.HEATING
-        return HVACAction.IDLE
+        return self._hvac_action
 
     @property
     def extra_state_attributes(self):
@@ -223,34 +220,55 @@ class SmartThermostat(ClimateEntity):
             await self._control_heating()
             self.async_write_ha_state()
 
-    async def async_set_hvac_mode(self, hvac_mode):
-        """Set new target operation mode."""
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set new target hvac mode."""
+        if hvac_mode not in self.hvac_modes:
+            return
+            
         self._hvac_mode = hvac_mode
-        self._add_action(f"Set mode to {hvac_mode}")
         
-        # Control underlying HVAC entity
-        if self._heater_switch:  # renamed from _heater_switch but still using same variable
-            await self._hass.services.async_call(
-                'climate', 'set_hvac_mode',
-                {
-                    'entity_id': self._heater_switch,
-                    'hvac_mode': 'off' if hvac_mode == HVACMode.OFF else 'heat'
-                }
-            )
-            if hvac_mode != HVACMode.OFF:
-                # Also set the temperature when turning on
+        # Control underlying HVAC
+        if self._hvac_entity:
+            if hvac_mode == HVACMode.OFF:
+                await self._hass.services.async_call(
+                    'climate', 'set_hvac_mode',
+                    {
+                        'entity_id': self._hvac_entity,
+                        'hvac_mode': 'off'
+                    }
+                )
+                self._hvac_action = HVACAction.OFF
+                self._is_heating = False
+            else:
+                await self._hass.services.async_call(
+                    'climate', 'set_hvac_mode',
+                    {
+                        'entity_id': self._hvac_entity,
+                        'hvac_mode': 'heat'
+                    }
+                )
+                # Also set temperature when turning on
                 await self._hass.services.async_call(
                     'climate', 'set_temperature',
                     {
-                        'entity_id': self._heater_switch,
+                        'entity_id': self._hvac_entity,
                         'temperature': self._target_temperature
                     }
                 )
-        self.async_write_ha_state()
+                
+        await self.async_update_ha_state()
+
+    async def async_turn_on(self) -> None:
+        """Turn the entity on."""
+        await self.async_set_hvac_mode(HVACMode.HEAT)
+
+    async def async_turn_off(self) -> None:
+        """Turn the entity off."""
+        await self.async_set_hvac_mode(HVACMode.OFF)
 
     async def _control_heating(self):
         """Control the heating based on temperature."""
-        if not self._heater_switch or self._hvac_mode == HVACMode.OFF:
+        if not self._hvac_entity or self._hvac_mode == HVACMode.OFF:
             return
 
         current_temp = self.current_temperature
@@ -265,14 +283,14 @@ class SmartThermostat(ClimateEntity):
             await self._hass.services.async_call(
                 'climate', 'set_hvac_mode',
                 {
-                    'entity_id': self._heater_switch,
+                    'entity_id': self._hvac_entity,
                     'hvac_mode': 'heat'
                 }
             )
             await self._hass.services.async_call(
                 'climate', 'set_temperature',
                 {
-                    'entity_id': self._heater_switch,
+                    'entity_id': self._hvac_entity,
                     'temperature': self._target_temperature
                 }
             )
