@@ -8,16 +8,12 @@ from homeassistant.components.climate import (
 from homeassistant.const import (
     ATTR_TEMPERATURE,
     UnitOfTemperature,
-    STATE_UNAVAILABLE,
-    STATE_UNKNOWN,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 import logging
 from datetime import datetime, timezone, timedelta
 from collections import deque
-from homeassistant.core import callback
-from homeassistant.util import dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,9 +52,6 @@ class SmartThermostat(ClimateEntity):
         self._tolerance = tolerance
         self._temp_sensors = temp_sensors
         
-        # Temperature state
-        self._current_temperature = None
-        
         # HVAC State
         self._hvac_mode = HVACMode.OFF
         self._hvac_action = HVACAction.OFF
@@ -77,29 +70,38 @@ class SmartThermostat(ClimateEntity):
         self._last_update = datetime.now()
         self._sensor_temperatures = {}
 
-        # Add missing initializations
-        self._heating_start_time = None
-        self._cooling_start_time = None
-        self._learning_heating_duration = 300  # 5 minutes default
-        self._off_time = 1500  # 25 minutes default
-        self._time_remaining = 0
-        self._cycle_status = "idle"
-
-    def _add_action(self, action: str) -> None:
-        """Add a new action to the action log without triggering updates."""
-        timestamp = dt_util.utcnow()
-        self._action_history.appendleft((timestamp, action))
-        if len(self._action_history) > self.MAX_ACTIONS:
-            self._action_history.popleft()
-        _LOGGER.debug("Action added: %s", action)
-
+    def _add_action(self, action: str):
+        """Add an action to the history."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self._action_history.appendleft(f"[{timestamp}] {action}")
+        
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
-        """Check if sensor data is fresh without triggering updates."""
-        state = self.hass.states.get(sensor_id)
-        if state is None:
-            _LOGGER.warning("Sensor %s not found", sensor_id)
+        """Check if sensor data is fresh (within last 5 minutes)."""
+        state = self._hass.states.get(sensor_id)
+        if not state:
+            self._add_action(f"Sensor {sensor_id} not found")
+            # Remove from sensor_temperatures if not found
+            self._sensor_temperatures.pop(sensor_id, None)
             return False
-        return True
+            
+        try:
+            last_updated = state.last_updated
+            if isinstance(last_updated, str):
+                last_updated = datetime.strptime(last_updated, "%Y-%m-%dT%H:%M:%S.%f%z")
+            
+            now = datetime.now(timezone.utc)
+            time_diff = (now - last_updated).total_seconds()
+            
+            if time_diff > 300:  # 5 minutes
+                self._add_action(f"Sensor {sensor_id} data is stale: {time_diff:.1f}s old")
+                # Remove stale data from sensor_temperatures
+                self._sensor_temperatures.pop(sensor_id, None)
+                return False
+            return True
+        except Exception as e:
+            self._add_action(f"Error checking freshness for {sensor_id}: {str(e)}")
+            self._sensor_temperatures.pop(sensor_id, None)
+            return False
 
     @property
     def name(self):
@@ -113,23 +115,39 @@ class SmartThermostat(ClimateEntity):
 
     @property
     def current_temperature(self):
-        """Return the current temperature."""
-        # Use a guard to prevent recursive updates
-        if getattr(self, '_updating_temperature', False):
-            return None
+        """Return the average current temperature from fresh sensors only."""
+        fresh_temperatures = {}  # Use dictionary to track both temp and source
         
-        try:
-            self._updating_temperature = True
-            for sensor_id in self._temp_sensors:
-                if self._is_sensor_fresh(sensor_id):
-                    state = self.hass.states.get(sensor_id)
+        for sensor_id in self._temp_sensors:
+            try:
+                if not self._is_sensor_fresh(sensor_id):
+                    continue
+                    
+                state = self._hass.states.get(sensor_id)
+                if state and state.state not in ('unknown', 'unavailable'):
                     try:
-                        return float(state.state)
-                    except (ValueError, TypeError):
+                        temp = float(state.state)
+                        fresh_temperatures[sensor_id] = temp
+                        self._add_action(f"Got fresh reading from {sensor_id}: {temp}°C")
+                    except ValueError:
+                        self._add_action(f"Invalid temperature value from {sensor_id}: {state.state}")
                         continue
-            return None
-        finally:
-            self._updating_temperature = False
+                else:
+                    self._add_action(f"Invalid state from {sensor_id}: {state.state if state else 'No state'}")
+            except Exception as e:
+                self._add_action(f"Unexpected error with {sensor_id}: {str(e)}")
+                continue
+
+        if fresh_temperatures:
+            # Update the sensor_temperatures dictionary
+            self._sensor_temperatures = fresh_temperatures.copy()
+            avg_temp = sum(fresh_temperatures.values()) / len(fresh_temperatures)
+            self._current_temperature = avg_temp
+            self._add_action(f"Calculated average temperature: {avg_temp:.1f}°C from {len(fresh_temperatures)} sensors")
+            return avg_temp
+        else:
+            self._add_action("No fresh temperature data available")
+            return self._current_temperature
 
     @property
     def target_temperature(self):
@@ -169,14 +187,29 @@ class SmartThermostat(ClimateEntity):
     @property
     def extra_state_attributes(self):
         """Return entity specific state attributes."""
-        cycle_type = "heating" if self._is_heating else "cooling" if self._is_cooling else "idle"
-        recent_actions = list(self._action_history)
+        now = datetime.now()
         
+        # Calculate time remaining in current cycle
+        if self._heating_start_time and self._is_heating:
+            elapsed = (now - self._heating_start_time).total_seconds()
+            self._time_remaining = max(0, self._learning_heating_duration - elapsed)
+            cycle_type = "heating"
+        elif self._cooling_start_time and not self._is_heating:
+            elapsed = (now - self._cooling_start_time).total_seconds()
+            self._time_remaining = max(0, self._off_time - elapsed)
+            cycle_type = "cooling"
+        else:
+            self._time_remaining = 0
+            cycle_type = "idle"
+
         return {
-            "action_history": recent_actions,
+            "action_history": list(self._action_history),
             "sensor_temperatures": self._sensor_temperatures,
             "average_temperature": self._current_temperature,
             "fresh_sensor_count": len(self._sensor_temperatures),
+            "available_sensors": self._temp_sensors,
+            "last_update": now.strftime("%H:%M:%S"),
+            "learning_duration": round(self._learning_heating_duration / 60, 1),
             "cycle_status": self._cycle_status,
             "time_remaining": round(self._time_remaining / 60, 1),
             "cycle_type": cycle_type
@@ -273,38 +306,3 @@ class SmartThermostat(ClimateEntity):
         # Update temperature before controlling heating
         self.current_temperature
         await self._control_heating() 
-
-    async def async_added_to_hass(self):
-        """Run when entity about to be added."""
-        await super().async_added_to_hass()
-
-        async def _update_state(*_):
-            """Update state."""
-            # Get current temperature before updating state
-            self.current_temperature
-            await self._control_heating()
-            # Use force_update=False to prevent recursion
-            self.async_write_ha_state()
-
-        # Update every 15 seconds instead of 30
-        self.async_on_remove(
-            self._hass.helpers.event.async_track_time_interval(
-                _update_state, timedelta(seconds=15)
-            )
-        ) 
-
-    @callback
-    def _async_sensor_changed(self, event):
-        """Handle temperature changes."""
-        new_state = event.data.get("new_state")
-        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            self._add_action(f"Sensor update: {event.data['entity_id']} unavailable")
-        else:
-            try:
-                float(new_state.state)
-                self._add_action(f"Sensor update: {event.data['entity_id']} = {new_state.state}")
-            except ValueError as ex:
-                self._add_action(f"Invalid sensor reading: {ex}")
-        
-        # Update state only once per sensor change
-        self.async_write_ha_state() 
