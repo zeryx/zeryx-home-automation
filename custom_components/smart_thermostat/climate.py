@@ -52,6 +52,9 @@ class SmartThermostat(ClimateEntity):
         self._tolerance = tolerance
         self._temp_sensors = temp_sensors
         
+        # Temperature state
+        self._current_temperature = None
+        
         # HVAC State
         self._hvac_mode = HVACMode.OFF
         self._hvac_action = HVACAction.OFF
@@ -116,7 +119,7 @@ class SmartThermostat(ClimateEntity):
     @property
     def current_temperature(self):
         """Return the average current temperature from fresh sensors only."""
-        fresh_temperatures = {}  # Use dictionary to track both temp and source
+        fresh_temperatures = {}
         
         for sensor_id in self._temp_sensors:
             try:
