@@ -73,6 +73,14 @@ class SmartThermostat(ClimateEntity):
         self._last_update = datetime.now()
         self._sensor_temperatures = {}
 
+        # Add missing initializations
+        self._heating_start_time = None
+        self._cooling_start_time = None
+        self._learning_heating_duration = 300  # 5 minutes default
+        self._off_time = 1500  # 25 minutes default
+        self._time_remaining = 0
+        self._cycle_status = "idle"
+
     def _add_action(self, action: str):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
