@@ -1,0 +1,78 @@
+type: vertical-stack
+cards:
+  - type: custom:mushroom-template-card
+    primary: Smart Thermostat Status
+    secondary: >
+      {{ states('climate.thermostat') }}
+    icon: mdi:thermostat
+    fill_container: true
+    
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Bedroom
+        secondary: >
+          {{ states('sensor.bedroom_temperature') }}°C
+        icon: mdi:thermometer
+        
+      - type: custom:mushroom-template-card
+        primary: Main Floor
+        secondary: >
+          {{ states('sensor.main_floor_temperature') }}°C
+        icon: mdi:thermometer
+        
+      - type: custom:mushroom-template-card
+        primary: Thermostat
+        secondary: >
+          {{ states('sensor.thermostat_current_temperature') }}°C
+        icon: mdi:thermometer
+        
+      - type: custom:mushroom-template-card
+        primary: Average
+        secondary: >
+          {% set temps = [
+            states('sensor.bedroom_temperature') | float,
+            states('sensor.main_floor_temperature') | float,
+            states('sensor.thermostat_current_temperature') | float
+          ] %}
+          {{ (temps | sum / temps | length) | round(1) }}°C
+        icon: mdi:thermometer-lines
+
+  - type: custom:mushroom-climate-card
+    entity: climate.thermostat
+    fill_container: true
+    show_temperature_control: true
+    
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Occupancy
+        secondary: >
+          {% if is_state('binary_sensor.main_floor_occupancy', 'on') 
+             or is_state('binary_sensor.thermostat_occupancy', 'on')
+             or is_state('binary_sensor.bedroom_occupancy', 'on') %}
+            Occupied
+          {% else %}
+            Unoccupied
+          {% endif %}
+        icon: >
+          {% if is_state('binary_sensor.main_floor_occupancy', 'on') 
+             or is_state('binary_sensor.thermostat_occupancy', 'on')
+             or is_state('binary_sensor.bedroom_occupancy', 'on') %}
+            mdi:home-account
+          {% else %}
+            mdi:home-outline
+          {% endif %}
+          
+      - type: custom:mushroom-template-card
+        primary: HVAC Status
+        secondary: >
+          {{ states('climate.thermostat') }}
+        icon: >
+          {% if states('climate.thermostat') == 'heat' %}
+            mdi:fire
+          {% else %}
+            mdi:hvac-off
+          {% endif %} 
