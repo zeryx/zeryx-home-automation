@@ -72,37 +72,82 @@ class SmartThermostat(ClimateEntity, RestoreEntity):
         self._action_history = deque(maxlen=50)
         self._sensor_temperatures = {}
 
+    @property
+    def state(self):
+        """Return the current state."""
+        return self._hvac_mode
+
+    @property
+    def extra_state_attributes(self):
+        """Return entity specific state attributes."""
+        now = datetime.now()
+        
+        # Calculate time remaining in current cycle
+        if self._heating_start_time and self._is_heating:
+            elapsed = (now - self._heating_start_time).total_seconds()
+            self._time_remaining = max(0, self._learning_heating_duration - elapsed)
+            cycle_type = "heating"
+        elif self._cooling_start_time and not self._is_heating:
+            elapsed = (now - self._cooling_start_time).total_seconds()
+            self._time_remaining = max(0, self._off_time - elapsed)
+            cycle_type = "cooling"
+        else:
+            self._time_remaining = 0
+            cycle_type = "idle"
+
+        # Convert action history to list of strings for serialization
+        action_history = [str(action) for action in self._action_history]
+        
+        # Ensure all values are JSON serializable
+        return {
+            "action_history": action_history,
+            "sensor_temperatures": {k: float(v) for k, v in self._sensor_temperatures.items()},
+            "average_temperature": float(self._current_temperature) if self._current_temperature is not None else None,
+            "fresh_sensor_count": len(self._sensor_temperatures),
+            "available_sensors": list(self._temp_sensors),
+            "last_update": now.strftime("%H:%M:%S"),
+            "learning_duration": round(self._learning_heating_duration / 60, 1),
+            "cycle_status": str(self._cycle_status),
+            "time_remaining": round(self._time_remaining / 60, 1),
+            "cycle_type": str(cycle_type),
+            "is_heating": bool(self._is_heating)
+        }
+
     async def async_added_to_hass(self):
         """Handle addition to Home Assistant."""
         await super().async_added_to_hass()
 
-        # Restore previous state if available
         last_state = await self.async_get_last_state()
         if last_state is not None:
-            # Restore basic climate attributes
-            self._hvac_mode = last_state.state
-            self._target_temperature = last_state.attributes.get(
-                'temperature', self._target_temperature)
-            self._current_temperature = last_state.attributes.get(
-                'current_temperature', None)
+            try:
+                # Restore basic climate attributes
+                self._hvac_mode = HVACMode(last_state.state)
+                self._target_temperature = float(last_state.attributes.get(
+                    'temperature', self._target_temperature))
+                self._current_temperature = last_state.attributes.get(
+                    'current_temperature')
+                if self._current_temperature is not None:
+                    self._current_temperature = float(self._current_temperature)
 
-            # Restore custom attributes
-            attrs = last_state.attributes
-            self._learning_heating_duration = attrs.get(
-                'learning_duration', 600) * 60  # Convert from minutes to seconds
-            self._off_time = attrs.get('off_time', 300)
-            self._cycle_status = attrs.get('cycle_status', 'idle')
-            self._is_heating = attrs.get('is_heating', False)
-            
-            # Restore timing information if heating was in progress
-            if self._is_heating:
-                time_remaining = attrs.get('time_remaining', 0) * 60  # Convert from minutes to seconds
-                if time_remaining > 0:
-                    now = datetime.now()
-                    self._heating_start_time = now - timedelta(
-                        seconds=(self._learning_heating_duration - time_remaining))
-            
-            self._add_action("State restored from Home Assistant")
+                # Restore custom attributes
+                attrs = last_state.attributes
+                self._learning_heating_duration = float(attrs.get(
+                    'learning_duration', 10)) * 60  # Convert from minutes to seconds
+                self._off_time = int(attrs.get('off_time', 300))
+                self._cycle_status = str(attrs.get('cycle_status', 'idle'))
+                self._is_heating = bool(attrs.get('is_heating', False))
+                
+                # Restore timing information if heating was in progress
+                if self._is_heating:
+                    time_remaining = float(attrs.get('time_remaining', 0)) * 60  # Convert from minutes to seconds
+                    if time_remaining > 0:
+                        now = datetime.now()
+                        self._heating_start_time = now - timedelta(
+                            seconds=(self._learning_heating_duration - time_remaining))
+                
+                self._add_action("State restored from Home Assistant")
+            except (ValueError, TypeError) as ex:
+                self._add_action(f"Error restoring state: {str(ex)}")
 
         # Set up sensors
         for sensor_id in self._temp_sensors:
@@ -233,37 +278,6 @@ class SmartThermostat(ClimateEntity, RestoreEntity):
     def hvac_action(self) -> HVACAction:
         """Return the current running hvac operation."""
         return self._hvac_action
-
-    @property
-    def extra_state_attributes(self):
-        """Return entity specific state attributes."""
-        now = datetime.now()
-        
-        # Calculate time remaining in current cycle
-        if self._heating_start_time and self._is_heating:
-            elapsed = (now - self._heating_start_time).total_seconds()
-            self._time_remaining = max(0, self._learning_heating_duration - elapsed)
-            cycle_type = "heating"
-        elif self._cooling_start_time and not self._is_heating:
-            elapsed = (now - self._cooling_start_time).total_seconds()
-            self._time_remaining = max(0, self._off_time - elapsed)
-            cycle_type = "cooling"
-        else:
-            self._time_remaining = 0
-            cycle_type = "idle"
-
-        return {
-            "action_history": list(self._action_history),
-            "sensor_temperatures": self._sensor_temperatures,
-            "average_temperature": self._current_temperature,
-            "fresh_sensor_count": len(self._sensor_temperatures),
-            "available_sensors": self._temp_sensors,
-            "last_update": now.strftime("%H:%M:%S"),
-            "learning_duration": round(self._learning_heating_duration / 60, 1),
-            "cycle_status": self._cycle_status,
-            "time_remaining": round(self._time_remaining / 60, 1),
-            "cycle_type": cycle_type
-        }
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
