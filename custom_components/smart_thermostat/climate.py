@@ -85,8 +85,7 @@ class SmartThermostat(ClimateEntity):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
-        # Remove the immediate state update to prevent recursion
-        # self.async_schedule_update_ha_state(True)
+        self.async_write_ha_state()
 
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
@@ -200,27 +199,12 @@ class SmartThermostat(ClimateEntity):
     @property
     def extra_state_attributes(self):
         """Return entity specific state attributes."""
-        now = datetime.now()
+        cycle_type = "heating" if self._is_heating else "cooling" if self._is_cooling else "idle"
+        recent_actions = list(self._action_history)
         
-        # Calculate time remaining in current cycle
-        if self._heating_start_time and self._is_heating:
-            elapsed = (now - self._heating_start_time).total_seconds()
-            self._time_remaining = max(0, self._learning_heating_duration - elapsed)
-            cycle_type = "heating"
-        elif self._cooling_start_time and not self._is_heating:
-            elapsed = (now - self._cooling_start_time).total_seconds()
-            self._time_remaining = max(0, self._off_time - elapsed)
-            cycle_type = "cooling"
-        else:
-            self._time_remaining = 0
-            cycle_type = "idle"
-
-        # Take only the 5 most recent actions
-        recent_actions = list(self._action_history)[:5]
-
         return {
             "action_history": recent_actions,
-            "sensor_temperatures": dict(list(self._sensor_temperatures.items())[:5]),  # Limit sensor data
+            "sensor_temperatures": self._sensor_temperatures,
             "average_temperature": self._current_temperature,
             "fresh_sensor_count": len(self._sensor_temperatures),
             "cycle_status": self._cycle_status,
@@ -322,6 +306,8 @@ class SmartThermostat(ClimateEntity):
 
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
+        await super().async_added_to_hass()
+
         async def _update_state(*_):
             """Update state."""
             # Get current temperature before updating state
