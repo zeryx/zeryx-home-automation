@@ -241,6 +241,7 @@ class SmartThermostat(ClimateEntity):
             self._add_action(f"Set temperature to {temp}°C")
             await self._control_heating()
             self.async_write_ha_state()
+            self._add_action(f"Set temperature to {temp}°C")
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
