@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from collections import deque
 from homeassistant.core import callback
+from homeassistant.util import dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,11 +85,14 @@ class SmartThermostat(ClimateEntity):
         self._time_remaining = 0
         self._cycle_status = "idle"
 
-    def _add_action(self, action: str):
-        """Add an action to the history."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self._action_history.appendleft(f"[{timestamp}] {action}")
-        self.async_write_ha_state()
+    def _add_action(self, action: str) -> None:
+        """Add a new action to the action log."""
+        timestamp = dt_util.utcnow()
+        self._action_history.appendleft((timestamp, action))
+        if len(self._action_history) > self.MAX_ACTIONS:
+            self._action_history.popleft()
+        # Remove the state update from here
+        _LOGGER.debug("Action added: %s", action)
 
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if the sensor data is fresh."""
@@ -110,15 +114,33 @@ class SmartThermostat(ClimateEntity):
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        if not self._sensor_temperatures:
+        try:
+            # Get valid temperatures from sensors
+            valid_temps = []
+            for sensor_id in self._temp_sensors:
+                state = self.hass.states.get(sensor_id)
+                if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    self._add_action(f"Sensor {sensor_id} unavailable")
+                    continue
+                    
+                try:
+                    temp = float(state.state)
+                    valid_temps.append(temp)
+                except ValueError:
+                    self._add_action(f"Invalid reading from {sensor_id}: {state.state}")
+                    continue
+
+            if not valid_temps:
+                self._add_action("No valid temperature readings")
+                return None
+
+            # Calculate average of valid temperatures
+            avg_temp = sum(valid_temps) / len(valid_temps)
+            return round(avg_temp, 1)
+
+        except Exception as ex:
+            _LOGGER.error("Error getting temperature: %s", ex)
             return None
-        
-        # Calculate average of all available sensor temperatures
-        valid_temps = [temp for temp in self._sensor_temperatures.values() if temp is not None]
-        if not valid_temps:
-            return None
-        
-        return sum(valid_temps) / len(valid_temps)
 
     @property
     def target_temperature(self):
@@ -285,28 +307,15 @@ class SmartThermostat(ClimateEntity):
     @callback
     def _async_sensor_changed(self, event):
         """Handle temperature changes."""
-        try:
-            new_state = event.data.get("new_state")
-            sensor_id = event.data["entity_id"]
-            
-            if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                self._sensor_temperatures[sensor_id] = None
-                self._add_action(f"Sensor {sensor_id} unavailable")
-            else:
-                try:
-                    temp = float(new_state.state)
-                    # Optional: Round to reasonable precision
-                    temp = round(temp, 1)  
-                    self._sensor_temperatures[sensor_id] = temp
-                except ValueError as ex:
-                    _LOGGER.error("Unable to update from sensor: %s", ex)
-                    self._add_action(f"Error reading {sensor_id}: {ex}")
-            
-            # Protect the state update
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            self._add_action(f"Sensor update: {event.data['entity_id']} unavailable")
+        else:
             try:
-                self.async_write_ha_state()
-            except Exception as ex:
-                _LOGGER.error("Error updating state: %s", ex)
-            
-        except Exception as ex:
-            _LOGGER.error("Unexpected error in sensor update: %s", ex) 
+                float(new_state.state)
+                self._add_action(f"Sensor update: {event.data['entity_id']} = {new_state.state}")
+            except ValueError as ex:
+                self._add_action(f"Invalid sensor reading: {ex}")
+        
+        # Update state only once per sensor change
+        self.async_write_ha_state() 
