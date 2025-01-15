@@ -19,6 +19,7 @@ BEDROOM_OCCUPANCY_SENSOR = "binary_sensor.bedroom_occupancy"
 BEDROOM_TEMPERATURE_SENSOR = "sensor.bedroom_temperature"
 OFFICE_TEMPERATURE_SENSOR = "sensor.office_temperature"
 THERMOSTAT_TEMPERATURE_SENSOR = "sensor.thermostat_current_temperature"
+HVAC_CONTROLLER_TEMPERATURE_SENSOR = "sensor.hvac_controller_temperature"
 
 # Default setpoint temperatures
 DEFAULT_TEMPERATURE_SETPOINT = 21.0  # Celsius
@@ -60,7 +61,8 @@ def get_current_temperature():
     temperature_sensors = [
         BEDROOM_TEMPERATURE_SENSOR,
         OFFICE_TEMPERATURE_SENSOR,
-        THERMOSTAT_TEMPERATURE_SENSOR
+        THERMOSTAT_TEMPERATURE_SENSOR,
+        HVAC_CONTROLLER_TEMPERATURE_SENSOR
     ]
 
     fresh_temperatures = []
