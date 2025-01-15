@@ -85,35 +85,13 @@ class SmartThermostat(ClimateEntity):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
-        self.async_write_ha_state()
 
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
-        """Check if sensor data is fresh (within last 5 minutes)."""
-        state = self._hass.states.get(sensor_id)
-        if not state:
-            self._add_action(f"Sensor {sensor_id} not found")
-            # Remove from sensor_temperatures if not found
-            self._sensor_temperatures.pop(sensor_id, None)
+        """Check if the sensor data is fresh."""
+        if sensor_id not in self._sensor_temperatures:
+            # Instead of adding an action, just return False
             return False
-            
-        try:
-            last_updated = state.last_updated
-            if isinstance(last_updated, str):
-                last_updated = datetime.strptime(last_updated, "%Y-%m-%dT%H:%M:%S.%f%z")
-            
-            now = datetime.now(timezone.utc)
-            time_diff = (now - last_updated).total_seconds()
-            
-            if time_diff > 300:  # 5 minutes
-                self._add_action(f"Sensor {sensor_id} data is stale: {time_diff:.1f}s old")
-                # Remove stale data from sensor_temperatures
-                self._sensor_temperatures.pop(sensor_id, None)
-                return False
-            return True
-        except Exception as e:
-            self._add_action(f"Error checking freshness for {sensor_id}: {str(e)}")
-            self._sensor_temperatures.pop(sensor_id, None)
-            return False
+        return True
 
     @property
     def name(self):
