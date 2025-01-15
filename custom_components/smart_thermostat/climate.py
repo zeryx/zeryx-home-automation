@@ -85,6 +85,8 @@ class SmartThermostat(ClimateEntity):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
+        # Trigger an immediate state update when adding actions
+        self.async_schedule_update_ha_state(True)
         
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
@@ -213,8 +215,11 @@ class SmartThermostat(ClimateEntity):
             self._time_remaining = 0
             cycle_type = "idle"
 
+        # Take only the 5 most recent actions for the UI
+        recent_actions = list(self._action_history)[:5]
+
         return {
-            "action_history": list(self._action_history),
+            "action_history": recent_actions,  # Only return 5 most recent actions
             "sensor_temperatures": self._sensor_temperatures,
             "average_temperature": self._current_temperature,
             "fresh_sensor_count": len(self._sensor_temperatures),
@@ -317,3 +322,16 @@ class SmartThermostat(ClimateEntity):
         # Update temperature before controlling heating
         self.current_temperature
         await self._control_heating() 
+
+    async def async_added_to_hass(self):
+        """Run when entity about to be added."""
+        async def _update_state(*_):
+            """Update state."""
+            await self.async_update_ha_state(True)
+
+        # Update every 30 seconds
+        self.async_on_remove(
+            self._hass.helpers.event.async_track_time_interval(
+                _update_state, timedelta(seconds=30)
+            )
+        ) 
