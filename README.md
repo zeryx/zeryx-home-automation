@@ -1,4 +1,5 @@
 # Smart HVAC Controller
+![image](https://github.com/user-attachments/assets/f1e8cc26-0285-48e0-9212-70b4df1fb08f)
 
 ## Overview
 This project provides intelligent control of multi-source heating systems, including boiler/radiator heating and heat pumps. By integrating with Home Assistant, it orchestrates both an Ecobee thermostat for boiler control and SmartIR for heat pump management, optimizing comfort and efficiency across different heating sources.
