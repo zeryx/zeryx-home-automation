@@ -163,8 +163,8 @@ def control_loop():
             # Turn off heat and wait minimum off time
             add_event("Turning off heat after heating session.")
             set_hvac_mode("off")
-            post_off_temperature = get_current_temperature()
             stop_event.wait(OFF_TIME * 60)
+            post_off_temperature = get_current_temperature()
 
             # Measure temperature increase and adjust heating duration
             if post_off_temperature is not None:

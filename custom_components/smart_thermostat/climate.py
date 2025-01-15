@@ -23,8 +23,8 @@ DEFAULT_NAME = "Smart Thermostat"
 async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_add_entities, discovery_info=None):
     """Set up the smart thermostat platform."""
     name = config.get("name", DEFAULT_NAME)
-    temp_sensors = config.get("temperature_sensors", [])  # Get list of sensors
-    heater_switch = config.get("heater")
+    temp_sensors = config.get("temperature_sensors", [])
+    hvac_entity = config.get("hvac_entity")
     min_temp = config.get("min_temp", 16)
     max_temp = config.get("max_temp", 25)
     target_temp = config.get("target_temp", 20)
@@ -32,7 +32,7 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
 
     async_add_entities([
         SmartThermostat(
-            hass, name, temp_sensors, heater_switch,
+            hass, name, temp_sensors, hvac_entity,
             min_temp, max_temp, target_temp, tolerance
         )
     ])
@@ -227,17 +227,25 @@ class SmartThermostat(ClimateEntity):
         """Set new target operation mode."""
         self._hvac_mode = hvac_mode
         self._add_action(f"Set mode to {hvac_mode}")
-        if hvac_mode == HVACMode.OFF:
-            # Turn off heater
-            if self._heater_switch:
+        
+        # Control underlying HVAC entity
+        if self._heater_switch:  # renamed from _heater_switch but still using same variable
+            await self._hass.services.async_call(
+                'climate', 'set_hvac_mode',
+                {
+                    'entity_id': self._heater_switch,
+                    'hvac_mode': 'off' if hvac_mode == HVACMode.OFF else 'heat'
+                }
+            )
+            if hvac_mode != HVACMode.OFF:
+                # Also set the temperature when turning on
                 await self._hass.services.async_call(
-                    'switch', 'turn_off',
-                    {'entity_id': self._heater_switch}
+                    'climate', 'set_temperature',
+                    {
+                        'entity_id': self._heater_switch,
+                        'temperature': self._target_temperature
+                    }
                 )
-            self._is_heating = False
-        else:
-            # Control heating based on temperature
-            await self._control_heating()
         self.async_write_ha_state()
 
     async def _control_heating(self):
@@ -252,61 +260,25 @@ class SmartThermostat(ClimateEntity):
 
         now = datetime.now()
 
-        # Check if we're in a cooling cycle
-        if self._cooling_start_time:
-            cooling_elapsed = (now - self._cooling_start_time).total_seconds()
-            if cooling_elapsed < self._off_time:
-                self._cycle_status = f"Cooling cycle: {round((self._off_time - cooling_elapsed) / 60, 1)}m remaining"
-                return
-            self._cooling_start_time = None
-
-        # Check if we're in a heating cycle
-        if self._heating_start_time:
-            heating_elapsed = (now - self._heating_start_time).total_seconds()
-            if heating_elapsed < self._learning_heating_duration:
-                self._cycle_status = f"Heating cycle: {round((self._learning_heating_duration - heating_elapsed) / 60, 1)}m remaining"
-                return
-            
-            # End of heating cycle
-            if self._is_heating:
-                await self._hass.services.async_call(
-                    'switch', 'turn_off',
-                    {'entity_id': self._heater_switch}
-                )
-                self._is_heating = False
-                self._heating_start_time = None
-                self._cooling_start_time = now
-                
-                # Adjust learning duration based on results
-                temperature_difference = current_temp - self._target_temperature
-                if temperature_difference > 0:
-                    adjustment_factor = max(0.1, min(1.0, temperature_difference / self._target_temperature))
-                    self._learning_heating_duration = max(
-                        self._minimum_on_time,
-                        self._learning_heating_duration * (1 - adjustment_factor)
-                    )
-                    self._add_action(f"Overshot setpoint. Adjusted heating duration to {self._learning_heating_duration / 60:.1f}m")
-                elif temperature_difference < 0:
-                    adjustment_factor = abs(temperature_difference) / self._target_temperature
-                    self._learning_heating_duration = min(
-                        self._maximum_on_time,
-                        self._learning_heating_duration + (adjustment_factor * heating_elapsed)
-                    )
-                    self._add_action(f"Undershot setpoint. Increased heating duration to {self._learning_heating_duration / 60:.1f}m")
-                
-                self._cycle_status = "Starting cooling cycle"
-                return
-
-        # Start new heating cycle if needed
+        # Control the underlying climate entity
         if current_temp < (self._target_temperature - self._tolerance) and not self._is_heating:
             await self._hass.services.async_call(
-                'switch', 'turn_on',
-                {'entity_id': self._heater_switch}
+                'climate', 'set_hvac_mode',
+                {
+                    'entity_id': self._heater_switch,
+                    'hvac_mode': 'heat'
+                }
+            )
+            await self._hass.services.async_call(
+                'climate', 'set_temperature',
+                {
+                    'entity_id': self._heater_switch,
+                    'temperature': self._target_temperature
+                }
             )
             self._is_heating = True
             self._heating_start_time = now
-            self._add_action(f"Started heating cycle at {current_temp}°C for {self._learning_heating_duration / 60:.1f}m")
-            self._cycle_status = "Starting heating cycle"
+            self._add_action(f"Started heating cycle at {current_temp}°C targeting {self._target_temperature}°C")
 
     async def async_update(self):
         """Update the current temperature and control heating."""

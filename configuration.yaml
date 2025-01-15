@@ -5,6 +5,7 @@ climate:
       - sensor.bedroom_temperature
       - sensor.office_temperature
       - sensor.thermostat_current_temperature
+      - sensor.hvac_controller_temperature
     hvac_entity: climate.thermostat
     target_temp: 21.0
     min_temp: 19.0

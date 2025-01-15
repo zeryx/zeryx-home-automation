@@ -50,6 +50,17 @@ cards:
         icon: mdi:thermometer
         
       - type: custom:mushroom-template-card
+        primary: HVAC Controller
+        secondary: >
+          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% if temps and 'sensor.hvac_controller_temperature' in temps %}
+            {{ temps['sensor.hvac_controller_temperature'] }}°C
+          {% else %}
+            No data
+          {% endif %}
+        icon: mdi:thermometer
+
+      - type: custom:mushroom-template-card
         primary: Average
         secondary: >
           {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
