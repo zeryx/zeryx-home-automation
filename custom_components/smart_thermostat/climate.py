@@ -85,7 +85,9 @@ class SmartThermostat(ClimateEntity):
         """Add an action to the history."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._action_history.appendleft(f"[{timestamp}] {action}")
-        
+        # Remove the immediate state update to prevent recursion
+        # self.async_schedule_update_ha_state(True)
+
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
         state = self._hass.states.get(sensor_id)
@@ -213,14 +215,14 @@ class SmartThermostat(ClimateEntity):
             self._time_remaining = 0
             cycle_type = "idle"
 
+        # Take only the 5 most recent actions
+        recent_actions = list(self._action_history)[:5]
+
         return {
-            "action_history": list(self._action_history),
-            "sensor_temperatures": self._sensor_temperatures,
+            "action_history": recent_actions,
+            "sensor_temperatures": dict(list(self._sensor_temperatures.items())[:5]),  # Limit sensor data
             "average_temperature": self._current_temperature,
             "fresh_sensor_count": len(self._sensor_temperatures),
-            "available_sensors": self._temp_sensors,
-            "last_update": now.strftime("%H:%M:%S"),
-            "learning_duration": round(self._learning_heating_duration / 60, 1),
             "cycle_status": self._cycle_status,
             "time_remaining": round(self._time_remaining / 60, 1),
             "cycle_type": cycle_type
@@ -317,3 +319,20 @@ class SmartThermostat(ClimateEntity):
         # Update temperature before controlling heating
         self.current_temperature
         await self._control_heating() 
+
+    async def async_added_to_hass(self):
+        """Run when entity about to be added."""
+        async def _update_state(*_):
+            """Update state."""
+            # Get current temperature before updating state
+            self.current_temperature
+            await self._control_heating()
+            # Use force_update=False to prevent recursion
+            self.async_write_ha_state()
+
+        # Update every 15 seconds instead of 30
+        self.async_on_remove(
+            self._hass.helpers.event.async_track_time_interval(
+                _update_state, timedelta(seconds=15)
+            )
+        ) 
