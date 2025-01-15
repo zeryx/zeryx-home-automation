@@ -3,10 +3,10 @@ cards:
   - type: custom:mushroom-template-card
     primary: Smart Thermostat Status
     secondary: >
-      {{ states('climate.thermostat') }}
+      {{ states('climate.smart_thermostat') }}
     icon: mdi:thermostat
     fill_container: true
-    entity: climate.thermostat
+    entity: climate.smart_thermostat
     tap_action:
       action: toggle
     hold_action:
@@ -19,20 +19,20 @@ cards:
       - type: custom:mushroom-template-card
         primary: Bedroom
         secondary: >
-          {% set temp = states('sensor.bedroom_temperature') %}
-          {% if temp not in ['unknown', 'unavailable'] %}
-            {{ temp }}°C
+          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% if temps and 'sensor.bedroom_temperature' in temps %}
+            {{ temps['sensor.bedroom_temperature'] }}°C
           {% else %}
             No data
           {% endif %}
         icon: mdi:thermometer
         
       - type: custom:mushroom-template-card
-        primary: Main Floor
+        primary: Office
         secondary: >
-          {% set temp = states('sensor.main_floor_temperature') %}
-          {% if temp not in ['unknown', 'unavailable'] %}
-            {{ temp }}°C
+          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% if temps and 'sensor.office_temperature' in temps %}
+            {{ temps['sensor.office_temperature'] }}°C
           {% else %}
             No data
           {% endif %}
@@ -41,9 +41,9 @@ cards:
       - type: custom:mushroom-template-card
         primary: Thermostat
         secondary: >
-          {% set temp = states('sensor.thermostat_current_temperature') %}
-          {% if temp not in ['unknown', 'unavailable'] %}
-            {{ temp }}°C
+          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
+          {% if temps and 'sensor.thermostat_current_temperature' in temps %}
+            {{ temps['sensor.thermostat_current_temperature'] }}°C
           {% else %}
             No data
           {% endif %}
@@ -52,16 +52,17 @@ cards:
       - type: custom:mushroom-template-card
         primary: Average
         secondary: >
-          {% set temps = state_attr('climate.thermostat', 'sensor_temperatures') %}
+          {% set temps = state_attr('climate.smart_thermostat', 'sensor_temperatures') %}
           {% if temps %}
-            {{ state_attr('climate.thermostat', 'average_temperature')|round(1) }}°C
+            {% set avg = state_attr('climate.smart_thermostat', 'average_temperature') %}
+            {{ avg|round(1) }}°C
           {% else %}
-            Calculating...
+            No data
           {% endif %}
         icon: mdi:thermometer-lines
 
   - type: custom:mushroom-climate-card
-    entity: climate.thermostat
+    entity: climate.smart_thermostat
     fill_container: true
     show_temperature_control: true
     hvac_modes:
@@ -92,30 +93,30 @@ cards:
       - type: custom:mushroom-template-card
         primary: HVAC Status
         secondary: >
-          {% if states('climate.thermostat') == 'off' %}
+          {% if states('climate.smart_thermostat') == 'off' %}
             Off
-          {% elif states('climate.thermostat') == 'heat' %}
-            {% if state_attr('climate.thermostat', 'hvac_action') == 'heating' %}
+          {% elif states('climate.smart_thermostat') == 'heat' %}
+            {% if state_attr('climate.smart_thermostat', 'hvac_action') == 'heating' %}
               Heating
             {% else %}
               Idle
             {% endif %}
           {% else %}
-            {{ states('climate.thermostat') }}
+            {{ states('climate.smart_thermostat') }}
           {% endif %}
         icon: >
-          {% if states('climate.thermostat') == 'heat' and state_attr('climate.thermostat', 'hvac_action') == 'heating' %}
+          {% if states('climate.smart_thermostat') == 'heat' and state_attr('climate.smart_thermostat', 'hvac_action') == 'heating' %}
             mdi:fire
-          {% elif states('climate.thermostat') == 'heat' %}
+          {% elif states('climate.smart_thermostat') == 'heat' %}
             mdi:thermostat
           {% else %}
             mdi:hvac-off
-          {% endif %} 
+          {% endif %}
 
   - type: custom:mushroom-template-card
     primary: Recent Actions
     secondary: >
-      {% set history = state_attr('climate.thermostat', 'action_history') %}
+      {% set history = state_attr('climate.smart_thermostat', 'action_history') %}
       {% if history %}
         {% for action in history %}
           {{ action }}{% if not loop.last %}<br>{% endif %}
@@ -127,3 +128,37 @@ cards:
     layout: vertical
     multiline_secondary: true
     fill_container: true 
+
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Cycle Status
+        secondary: >
+          {% set status = state_attr('climate.smart_thermostat', 'cycle_status') %}
+          {% set type = state_attr('climate.smart_thermostat', 'cycle_type') %}
+          {% set remaining = state_attr('climate.smart_thermostat', 'time_remaining') %}
+          {% if type != 'idle' %}
+            {{ type|title }} cycle: {{ remaining }}m remaining
+          {% else %}
+            Idle
+          {% endif %}
+        icon: >
+          {% set type = state_attr('climate.smart_thermostat', 'cycle_type') %}
+          {% if type == 'heating' %}
+            mdi:fire-circle
+          {% elif type == 'cooling' %}
+            mdi:timer-sand
+          {% else %}
+            mdi:timer-off-outline
+          {% endif %}
+          
+      - type: custom:mushroom-template-card
+        primary: Learning Duration
+        secondary: >
+          {% set duration = state_attr('climate.smart_thermostat', 'learning_duration') %}
+          {% if duration %}
+            {{ duration }}m
+          {% else %}
+            Unknown
+          {% endif %}
+        icon: mdi:brain 

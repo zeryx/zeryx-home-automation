@@ -3,7 +3,7 @@ climate:
     name: "Smart Thermostat"
     temperature_sensors:
       - sensor.bedroom_temperature
-      - sensor.main_floor_temperature
+      - sensor.office_temperature
       - sensor.thermostat_current_temperature
     hvac_entity: climate.thermostat
     target_temp: 21.0
