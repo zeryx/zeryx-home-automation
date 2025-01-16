@@ -275,38 +275,58 @@ class SmartThermostat(ClimateEntity):
         """Set new target hvac mode."""
         if hvac_mode not in self.hvac_modes:
             return
-            
+        
         self._hvac_mode = hvac_mode
         
-        # Control underlying HVAC
+        # Turn off both systems first
         if self._hvac_entity:
-            if hvac_mode == HVACMode.OFF:
+            await self._hass.services.async_call(
+                'climate', 'set_hvac_mode',
+                {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
+            )
+        if self._heat_pump_entity:
+            await self._hass.services.async_call(
+                'climate', 'set_hvac_mode',
+                {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
+            )
+        
+        # If turning off, update states and return
+        if hvac_mode == HVACMode.OFF:
+            self._hvac_action = HVACAction.OFF
+            self._is_heating = False
+            self._active_heat_source = None
+            self._add_action("System turned off")
+            self.async_write_ha_state()
+            return
+        
+        # If turning on, determine appropriate heat source and activate it
+        await self._check_outdoor_temperature()
+        if self._active_heat_source == "furnace":
+            if self._hvac_entity:
                 await self._hass.services.async_call(
                     'climate', 'set_hvac_mode',
-                    {
-                        'entity_id': self._hvac_entity,
-                        'hvac_mode': 'off'
-                    }
+                    {'entity_id': self._hvac_entity, 'hvac_mode': 'heat'}
                 )
-                self._hvac_action = HVACAction.OFF
-                self._is_heating = False
-            else:
+                await self._hass.services.async_call(
+                    'climate', 'set_temperature',
+                    {'entity_id': self._hvac_entity, 'temperature': self._max_temp}
+                )
+                self._add_action("Activated furnace heating")
+        elif self._active_heat_source == "heat_pump":
+            if self._heat_pump_entity:
                 await self._hass.services.async_call(
                     'climate', 'set_hvac_mode',
-                    {
-                        'entity_id': self._hvac_entity,
-                        'hvac_mode': 'heat'
-                    }
+                    {'entity_id': self._heat_pump_entity, 'hvac_mode': 'heat'}
                 )
-                # Set temperature to max_temp when turning on (Ecobee override)
                 await self._hass.services.async_call(
                     'climate', 'set_temperature',
                     {
-                        'entity_id': self._hvac_entity,
-                        'temperature': self._max_temp
+                        'entity_id': self._heat_pump_entity,
+                        'temperature': self._target_temperature
                     }
                 )
-                
+                self._add_action("Activated heat pump heating")
+        
         self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:

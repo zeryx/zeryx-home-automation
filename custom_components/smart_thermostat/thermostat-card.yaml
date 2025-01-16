@@ -8,7 +8,15 @@ cards:
     fill_container: true
     entity: climate.smart_furnace
     tap_action:
-      action: toggle
+      action: call-service
+      service: >
+        {% if states('climate.smart_furnace') == 'off' %}
+          smart_thermostat.turn_on
+        {% else %}
+          smart_thermostat.turn_off
+        {% endif %}
+      service_data:
+        entity_id: climate.smart_furnace
     hold_action:
       action: more-info
     
