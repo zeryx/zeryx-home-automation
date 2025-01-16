@@ -314,10 +314,12 @@ class SmartThermostat(ClimateEntity):
                 self._add_action("Activated furnace heating")
         elif self._active_heat_source == "heat_pump":
             if self._heat_pump_entity:
+                # Set mode to heat
                 await self._hass.services.async_call(
                     'climate', 'set_hvac_mode',
                     {'entity_id': self._heat_pump_entity, 'hvac_mode': 'heat'}
                 )
+                # Set the target temperature
                 await self._hass.services.async_call(
                     'climate', 'set_temperature',
                     {
