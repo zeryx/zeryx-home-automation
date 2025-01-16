@@ -10,6 +10,11 @@ homeassistant:
     climate.smart_thermostat:
       scan_interval: 10  # Updates every 10 seconds
 
+logger:
+  logs:
+    custom_components.smart_thermostat: debug
+
+
 smartir:
 climate:
   - platform: smartir

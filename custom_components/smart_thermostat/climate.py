@@ -90,9 +90,11 @@ class SmartThermostat(ClimateEntity):
         self._time_remaining = 0
 
     def _add_action(self, action: str):
-        """Add an action to the history."""
+        """Add an action to the history and log it."""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self._action_history.appendleft(f"[{timestamp}] {action}")
+        message = f"[{timestamp}] {action}"
+        self._action_history.appendleft(message)
+        _LOGGER.debug(message)
         
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
@@ -301,37 +303,35 @@ class SmartThermostat(ClimateEntity):
 
         now = datetime.now()
         
-        # Add status check logging
-        self._add_action(f"Current status: {self._cycle_status}, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C")
+        # Add detailed status logging
+        self._add_action(f"Status: {self._cycle_status}, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C, Heating: {self._is_heating}")
 
         # Check if heating cycle is complete
         if self._heating_start_time and self._is_heating:
             heating_elapsed = (now - self._heating_start_time).total_seconds()
             if heating_elapsed >= self._learning_heating_duration:
-                self._cycle_status = "off_period"  # Changed from "cooling"
+                self._cycle_status = "off_period"
                 await self._hass.services.async_call(
                     'climate', 'set_hvac_mode',
                     {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
                 )
                 self._is_heating = False
                 self._cooling_start_time = now
-                self._add_action(f"Completed heating cycle, reached {current_temp:.1f}°C, starting off period")
+                self._heating_start_time = None  # Reset heating start time
+                self._add_action(f"Completed heating cycle, starting {self._off_time/60:.1f}min off period")
                 return
 
         # Check if off period is complete
         if self._cooling_start_time and not self._is_heating:
             cooling_elapsed = (now - self._cooling_start_time).total_seconds()
-            self._add_action(f"Off period elapsed: {cooling_elapsed:.1f}s of {self._off_time}s required")
+            self._add_action(f"Off period: {cooling_elapsed:.1f}s of {self._off_time}s ({cooling_elapsed/60:.1f}min of {self._off_time/60:.1f}min)")
             
             if cooling_elapsed >= self._off_time:
                 self._cycle_status = "ready"
-                self._add_action("Off period complete - system ready for next cycle")
-                # Only adjust learning duration after full cooling period
-                temp_diff = self._target_temperature - current_temp
                 
-                # Calculate adjustment proportional to temperature difference
-                # Each degree of difference adjusts by 2 minutes (120 seconds)
-                adjustment = abs(temp_diff) * 120
+                # Adjust learning duration based on temperature difference
+                temp_diff = self._target_temperature - current_temp
+                adjustment = abs(temp_diff) * 120  # 2 minutes per degree difference
                 
                 if temp_diff > 0:  # We undershot
                     new_duration = min(
@@ -350,47 +350,36 @@ class SmartThermostat(ClimateEntity):
                         self._add_action(f"Overshot by {abs(temp_diff):.1f}°C - Decreasing duration to {new_duration/60:.1f}min (was {self._learning_heating_duration/60:.1f}min)")
                         self._learning_heating_duration = new_duration
                 
-                self._cooling_start_time = None  # Reset cooling period
+                self._cooling_start_time = None  # Reset cooling start time
+                self._add_action("Off period complete - ready for next cycle")
+                
+                # Immediately check if heating is needed
+                if current_temp < (self._target_temperature - self._tolerance):
+                    self._add_action(f"Temperature {current_temp:.1f}°C below target {self._target_temperature}°C - starting new heating cycle")
+                    await self._start_heating_cycle(now, current_temp)
+                return
 
-        # Log conditions for starting new heating cycle
-        if not self._is_heating:
-            temp_diff = self._target_temperature - current_temp
-            self._add_action(f"Checking heating conditions: Temp diff: {temp_diff:.1f}°C (Need > {self._tolerance}°C)")
-            if self._cooling_start_time:
-                cooling_elapsed = (now - self._cooling_start_time).total_seconds()
-                self._add_action(f"Off period status: {cooling_elapsed:.1f}s elapsed of {self._off_time}s required")
-
-        # Start new heating cycle if needed and cooling period is complete
+        # Start new heating cycle if needed and not in cooling period
         if (current_temp < (self._target_temperature - self._tolerance) and 
             not self._is_heating and 
-            (self._cooling_start_time is None or 
-             (now - self._cooling_start_time).total_seconds() >= self._off_time)):
+            not self._cooling_start_time):  # Only if not in cooling period
             
-            # Update cycle status before starting new heating cycle
-            self._cycle_status = "starting new cycle"
-            
-            await self._hass.services.async_call(
-                'climate', 'set_hvac_mode',
-                {'entity_id': self._hvac_entity, 'hvac_mode': 'heat'}
-            )
-            await self._hass.services.async_call(
-                'climate', 'set_temperature',
-                {'entity_id': self._hvac_entity, 'temperature': self._max_temp}
-            )
-            self._is_heating = True
-            self._heating_start_time = now
-            self._cooling_start_time = None
-            self._add_action(f"Started heating cycle at {current_temp:.1f}°C targeting {self._target_temperature}°C for {self._learning_heating_duration/60:.1f}min")
+            await self._start_heating_cycle(now, current_temp)
 
-        else:
-            # Log why we're not starting a new heating cycle
-            if not (current_temp < (self._target_temperature - self._tolerance)):
-                self._add_action(f"Waiting for temperature to drop: Current {current_temp:.1f}°C needs to be below {(self._target_temperature - self._tolerance):.1f}°C")
-            elif self._is_heating:
-                self._add_action("Already heating")
-            elif self._cooling_start_time is not None and (now - self._cooling_start_time).total_seconds() < self._off_time:
-                remaining = self._off_time - (now - self._cooling_start_time).total_seconds()
-                self._add_action(f"Still in off period: {remaining:.1f}s remaining")
+    async def _start_heating_cycle(self, now, current_temp):
+        """Helper method to start a new heating cycle."""
+        self._cycle_status = "heating"
+        await self._hass.services.async_call(
+            'climate', 'set_hvac_mode',
+            {'entity_id': self._hvac_entity, 'hvac_mode': 'heat'}
+        )
+        await self._hass.services.async_call(
+            'climate', 'set_temperature',
+            {'entity_id': self._hvac_entity, 'temperature': self._max_temp}
+        )
+        self._is_heating = True
+        self._heating_start_time = now
+        self._add_action(f"Started heating cycle at {current_temp:.1f}°C for {self._learning_heating_duration/60:.1f}min")
 
     async def async_update(self):
         """Update the current temperature and control heating."""
