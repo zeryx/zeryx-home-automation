@@ -231,7 +231,8 @@ class SmartThermostat(ClimateEntity):
             "learning_duration": round(self._learning_heating_duration / 60, 1),
             "cycle_status": self._cycle_status,
             "time_remaining": round(self._time_remaining / 60, 1),
-            "cycle_type": cycle_type
+            "cycle_type": cycle_type,
+            "off_time": round(self._off_time / 60, 1)
         }
 
     async def async_set_temperature(self, **kwargs):
