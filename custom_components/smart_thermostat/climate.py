@@ -318,9 +318,11 @@ class SmartThermostat(ClimateEntity):
                     {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
                 )
                 self._is_heating = False
+                self._hvac_action = HVACAction.OFF
                 self._cooling_start_time = now
-                self._heating_start_time = None  # Reset heating start time
+                self._heating_start_time = None
                 self._add_action(f"Completed heating cycle, starting {self._off_time/60:.1f}min off period")
+                self.async_write_ha_state()
                 return
 
         # Check if off period is complete
