@@ -14,6 +14,7 @@ from homeassistant.helpers.typing import ConfigType
 import logging
 from datetime import datetime, timezone, timedelta
 from collections import deque
+import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,37 +26,49 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
     name = config.get("name", DEFAULT_NAME)
     temp_sensors = config.get("temperature_sensors", [])
     hvac_entity = config.get("hvac_entity")
+    heat_pump_entity = config.get("heat_pump_entity")
     min_temp = config.get("min_temp", 16)
     max_temp = config.get("max_temp", 25)
     target_temp = config.get("target_temp", 20)
     tolerance = config.get("tolerance", 0.5)
-    minimum_on_time = config.get("minimum_on_time", 5) * 60  # Convert to seconds
-    maximum_on_time = config.get("maximum_on_time", 30) * 60  # Convert to seconds
-    off_time = config.get("off_time", 20) * 60  # Convert to seconds
+    minimum_on_time = config.get("minimum_on_time", 5) * 60
+    maximum_on_time = config.get("maximum_on_time", 30) * 60
+    off_time = config.get("off_time", 20) * 60
+    heat_pump_min_temp = config.get("heat_pump_min_temp", -5)
+    heat_pump_max_temp = config.get("heat_pump_max_temp", -3)
+    weather_entity = config.get("weather_entity", "weather.forecast_home")
 
     async_add_entities([
         SmartThermostat(
-            hass, name, temp_sensors, hvac_entity,
+            hass, name, temp_sensors, hvac_entity, heat_pump_entity,
             min_temp, max_temp, target_temp, tolerance,
-            minimum_on_time, maximum_on_time, off_time
+            minimum_on_time, maximum_on_time, off_time,
+            heat_pump_min_temp, heat_pump_max_temp, weather_entity
         )
     ])
 
 class SmartThermostat(ClimateEntity):
     """Smart Thermostat Climate Entity."""
     
-    def __init__(self, hass, name, temp_sensors, hvac_entity,
+    def __init__(self, hass, name, temp_sensors, hvac_entity, heat_pump_entity,
                  min_temp, max_temp, target_temp, tolerance,
-                 minimum_on_time, maximum_on_time, off_time):
+                 minimum_on_time, maximum_on_time, off_time,
+                 heat_pump_min_temp, heat_pump_max_temp, weather_entity):
         """Initialize the thermostat."""
+        # Validate required entities
+        if not hvac_entity or not heat_pump_entity:
+            raise ValueError("Both hvac_entity (furnace) and heat_pump_entity must be defined")
+            
         self._hass = hass
         self._name = name
         self._hvac_entity = hvac_entity
+        self._heat_pump_entity = heat_pump_entity
         self._min_temp = min_temp
         self._max_temp = max_temp
         self._target_temperature = target_temp
         self._tolerance = tolerance
         self._temp_sensors = temp_sensors
+        self._weather_entity = weather_entity
         
         # HVAC State
         self._hvac_mode = HVACMode.OFF
@@ -88,6 +101,10 @@ class SmartThermostat(ClimateEntity):
         self._off_time = off_time
         self._cycle_status = "ready"
         self._time_remaining = 0
+        self._heat_pump_min_temp = heat_pump_min_temp
+        self._heat_pump_max_temp = heat_pump_max_temp
+        self._active_heat_source = None
+        self._last_forecast_check = None
 
     def _add_action(self, action: str):
         """Add an action to the history and log it."""
@@ -125,7 +142,6 @@ class SmartThermostat(ClimateEntity):
             time_diff = (now - last_updated).total_seconds()
             
             if time_diff > 300:  # 5 minutes
-                self._add_action(f"Sensor {sensor_id} data is stale: {time_diff:.1f}s old")
                 # Remove stale data from sensor_temperatures
                 self._sensor_temperatures.pop(sensor_id, None)
                 return False
@@ -302,8 +318,140 @@ class SmartThermostat(ClimateEntity):
         """Turn the entity off."""
         await self.async_set_hvac_mode(HVACMode.OFF)
 
+    async def _check_outdoor_temperature(self):
+        """Check outdoor temperature and select appropriate heat source."""
+        now = datetime.now(timezone.utc)
+        
+        # Check forecast once per hour
+        if (self._last_forecast_check is None or 
+            (now - self._last_forecast_check).total_seconds() > 3600):
+            
+            try:
+                forecast = self._hass.states.get(self._weather_entity)
+                if not forecast:
+                    self._add_action(f"Weather entity {self._weather_entity} not found")
+                    return
+                    
+                if not forecast.attributes.get("temperature"):
+                    self._add_action(f"Temperature attribute missing from {self._weather_entity}")
+                    return
+                    
+                outdoor_temp = float(forecast.attributes.get("temperature"))
+                self._last_forecast_check = now
+                
+                # Determine appropriate heat source using inclusive boundaries
+                new_source = None
+                if outdoor_temp <= self._heat_pump_min_temp:
+                    new_source = "furnace"
+                elif outdoor_temp >= self._heat_pump_max_temp:
+                    new_source = "heat_pump"
+                else:
+                    # In transition zone - make an intelligent choice based on current source
+                    # If no current source, prefer heat pump as it's generally more efficient
+                    if self._active_heat_source is None:
+                        new_source = "heat_pump"
+                    else:
+                        # Keep current source to prevent frequent switching
+                        new_source = self._active_heat_source
+                    
+                # Log transition zone status if applicable
+                if self._heat_pump_min_temp < outdoor_temp < self._heat_pump_max_temp:
+                    self._add_action(f"Temperature {outdoor_temp}°C is in transition zone ({self._heat_pump_min_temp}°C to {self._heat_pump_max_temp}°C) - using {new_source}")
+                
+                if new_source != self._active_heat_source:
+                    self._active_heat_source = new_source
+                    await self._switch_heat_source(new_source)
+                    
+            except ValueError as e:
+                self._add_action(f"Error parsing temperature from {self._weather_entity}: {str(e)}")
+            except Exception as e:
+                self._add_action(f"Unexpected error checking outdoor temperature: {str(e)}")
+
+    async def _switch_heat_source(self, source):
+        """Switch between heat pump and furnace."""
+        try:
+            if source == "furnace":
+                # First ensure heat pump is off
+                if self._heat_pump_entity:
+                    await self._hass.services.async_call(
+                        'climate', 'set_hvac_mode',
+                        {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
+                    )
+                self._add_action("Switching to furnace due to low outdoor temperature")
+                
+            elif source == "heat_pump":
+                # First ensure furnace is off
+                if self._hvac_entity:
+                    await self._hass.services.async_call(
+                        'climate', 'set_hvac_mode',
+                        {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
+                    )
+                    # Wait for furnace cycle to complete if it's currently heating
+                    if self._is_heating:
+                        self._is_heating = False
+                        self._hvac_action = HVACAction.OFF
+                        self._heating_start_time = None
+                        
+                # Then activate heat pump with retries
+                if self._heat_pump_entity:
+                    max_retries = 3
+                    retry_count = 0
+                    success = False
+                    
+                    while retry_count < max_retries and not success:
+                        try:
+                            # First set mode to heat
+                            await self._hass.services.async_call(
+                                'climate', 'set_hvac_mode',
+                                {'entity_id': self._heat_pump_entity, 'hvac_mode': 'heat'}
+                            )
+                            
+                            # Small delay to ensure mode change is processed
+                            await asyncio.sleep(1)
+                            
+                            # Then set the target temperature
+                            await self._hass.services.async_call(
+                                'climate', 'set_temperature',
+                                {
+                                    'entity_id': self._heat_pump_entity,
+                                    'temperature': self._target_temperature
+                                }
+                            )
+                            
+                            # Verify the temperature was set correctly
+                            heat_pump_state = self._hass.states.get(self._heat_pump_entity)
+                            if heat_pump_state and heat_pump_state.attributes.get('temperature') == self._target_temperature:
+                                success = True
+                                self._add_action(f"Successfully set heat pump temperature to {self._target_temperature}°C")
+                            else:
+                                raise ValueError("Temperature verification failed")
+                                
+                        except Exception as e:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                self._add_action(f"Retry {retry_count}/{max_retries}: Failed to set heat pump temperature: {str(e)}")
+                                await asyncio.sleep(2)  # Wait before retry
+                            else:
+                                self._add_action(f"Failed to set heat pump temperature after {max_retries} attempts: {str(e)}")
+                                raise  # Re-raise the last exception
+                    
+                self._add_action("Switching to heat pump due to moderate outdoor temperature")
+                
+        except Exception as e:
+            self._add_action(f"Error during heat source switch: {str(e)}")
+            # Reset active source on error
+            self._active_heat_source = None
+            raise  # Re-raise the exception to ensure proper error handling
+
     async def _control_heating(self):
         """Control the heating based on temperature."""
+        await self._check_outdoor_temperature()
+        
+        if self._active_heat_source == "heat_pump":
+            # Skip furnace control logic when heat pump is active
+            return
+            
+        # Existing furnace control logic remains unchanged
         _LOGGER.debug(
             "Control Heating Check - Name: %s, Current Temp: %.1f, Target: %.1f, "
             "Is Heating: %s, Cycle Status: %s, Learning Duration: %.1f min",
@@ -314,7 +462,7 @@ class SmartThermostat(ClimateEntity):
             self._cycle_status,
             self._learning_heating_duration / 60
         )
-
+        
         if not self._hvac_entity or self._hvac_mode == HVACMode.OFF:
             self._cycle_status = "off"
             self._is_heating = False
