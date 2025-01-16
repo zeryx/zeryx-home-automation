@@ -2,7 +2,8 @@
 import logging
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.exceptions import ServiceNotFound, HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,15 +17,17 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         entity_id = call.data.get("entity_id")
         if entity_id is None:
             raise ValueError("entity_id must be provided for turn_on service")
-            
+
+        ent_reg = entity_registry.async_get(hass)
+        entity = ent_reg.async_get(entity_id)
+        if not entity:
+            raise ValueError(f"Entity {entity_id} not found")
+
         try:
-            await hass.services.async_call(
-                "climate", "set_hvac_mode",
-                {"entity_id": entity_id, "hvac_mode": "heat"},
-                blocking=True
-            )
-        except ServiceNotFound:
-            _LOGGER.error("Climate service not found. Is the climate integration configured?")
+            thermostat = hass.data[DOMAIN][entity.unique_id]
+            await thermostat.async_turn_on()
+        except KeyError:
+            _LOGGER.error("Thermostat %s not found in smart_thermostat component", entity_id)
             raise
         except HomeAssistantError as err:
             _LOGGER.error("Failed to turn on thermostat %s: %s", entity_id, str(err))
@@ -35,15 +38,17 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         entity_id = call.data.get("entity_id")
         if entity_id is None:
             raise ValueError("entity_id must be provided for turn_off service")
-            
+
+        ent_reg = entity_registry.async_get(hass)
+        entity = ent_reg.async_get(entity_id)
+        if not entity:
+            raise ValueError(f"Entity {entity_id} not found")
+
         try:
-            await hass.services.async_call(
-                "climate", "set_hvac_mode",
-                {"entity_id": entity_id, "hvac_mode": "off"},
-                blocking=True
-            )
-        except ServiceNotFound:
-            _LOGGER.error("Climate service not found. Is the climate integration configured?")
+            thermostat = hass.data[DOMAIN][entity.unique_id]
+            await thermostat.async_turn_off()
+        except KeyError:
+            _LOGGER.error("Thermostat %s not found in smart_thermostat component", entity_id)
             raise
         except HomeAssistantError as err:
             _LOGGER.error("Failed to turn off thermostat %s: %s", entity_id, str(err))

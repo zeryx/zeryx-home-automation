@@ -333,8 +333,8 @@ class SmartThermostat(ClimateEntity):
 
     async def async_turn_on(self) -> None:
         """Turn the entity on."""
+        await self._check_outdoor_temperature()
         await self.async_set_hvac_mode(HVACMode.HEAT)
-        await self.async_set_temperature(self.max_temp)
 
     async def async_turn_off(self) -> None:
         """Turn the entity off."""

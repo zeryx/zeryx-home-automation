@@ -3,20 +3,38 @@ cards:
   - type: custom:mushroom-template-card
     primary: Smart Furnace Status
     secondary: >
-      {{ states('climate.smart_furnace') }}
-    icon: mdi:thermostat
+      {% if states('climate.smart_furnace') == 'off' %}
+        Off
+      {% elif states('climate.smart_furnace') == 'heat' %}
+        {% if state_attr('climate.smart_furnace', 'hvac_action') == 'heating' %}
+          Heating
+        {% else %}
+          Idle
+        {% endif %}
+      {% else %}
+        {{ states('climate.smart_furnace') }}
+      {% endif %}
+    icon: >
+      {% if states('climate.smart_furnace') == 'heat' and state_attr('climate.smart_furnace', 'hvac_action') == 'heating' %}
+        mdi:fire
+      {% elif states('climate.smart_furnace') == 'heat' %}
+        mdi:thermostat
+      {% else %}
+        mdi:hvac-off
+      {% endif %}
     fill_container: true
     entity: climate.smart_furnace
     tap_action:
       action: call-service
-      service: >
-        {% if states('climate.smart_furnace') == 'off' %}
-          smart_thermostat.turn_on
-        {% else %}
-          smart_thermostat.turn_off
-        {% endif %}
+      service: climate.set_hvac_mode
       service_data:
         entity_id: climate.smart_furnace
+        hvac_mode: >
+          {% if states('climate.smart_furnace') == 'off' %}
+            heat
+          {% else %}
+            off
+          {% endif %}
     hold_action:
       action: more-info
     

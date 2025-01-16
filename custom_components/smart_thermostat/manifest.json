@@ -2,7 +2,7 @@
   "domain": "smart_thermostat",
   "name": "Smart Thermostat",
   "documentation": "https://github.com/your_username/your_repo",
-  "dependencies": ["climate"],
+  "dependencies": [],
   "codeowners": [],
   "requirements": [],
   "version": "1.0.0",
