@@ -279,7 +279,7 @@ class SmartThermostat(ClimateEntity):
                     }
                 )
                 
-        await self.async_update_ha_state()
+        await self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
         """Turn the entity on."""
@@ -294,6 +294,7 @@ class SmartThermostat(ClimateEntity):
         """Control the heating based on temperature."""
         if not self._hvac_entity or self._hvac_mode == HVACMode.OFF:
             self._add_action("Control skipped: HVAC is off or no entity")
+            self.async_write_ha_state()
             return
 
         current_temp = self.current_temperature

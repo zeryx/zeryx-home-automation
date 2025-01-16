@@ -11,11 +11,15 @@ homeassistant:
       scan_interval: 10  # Updates every 10 seconds
 
 logger:
+  default: info
   logs:
     custom_components.smart_thermostat: debug
+    custom_components.smart_thermostat.climate: debug
   filters:
     async_track_state_change_filter:
       - "Detected that custom integration 'smartir' calls `async_track_state_change`"
+    ignore_custom_components:
+      - "We found a custom integration"
 
 
 smartir:
