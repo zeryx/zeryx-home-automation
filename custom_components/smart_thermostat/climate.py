@@ -275,11 +275,11 @@ class SmartThermostat(ClimateEntity):
                     'climate', 'set_temperature',
                     {
                         'entity_id': self._hvac_entity,
-                        'temperature': self._max_temp  # Changed from fixed 23.0 to max_temp
+                        'temperature': self._max_temp
                     }
                 )
                 
-        await self.async_write_ha_state()
+        self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
         """Turn the entity on."""
