@@ -86,7 +86,7 @@ class SmartThermostat(ClimateEntity):
         self._minimum_heating_duration = minimum_on_time
         self._maximum_heating_duration = maximum_on_time
         self._off_time = off_time
-        self._cycle_status = "initializing"
+        self._cycle_status = "ready"
         self._time_remaining = 0
 
     def _add_action(self, action: str):
@@ -324,11 +324,16 @@ class SmartThermostat(ClimateEntity):
 
         current_temp = self.current_temperature
         if current_temp is None:
+            self._cycle_status = "error"
             self._add_action("No temperature reading available")
             return
 
         now = datetime.now()
         
+        # If we're not in any cycle and not cooling, ensure we're in ready state
+        if not self._is_heating and not self._cooling_start_time:
+            self._cycle_status = "ready"
+
         # Add detailed status logging
         self._add_action(f"Status: {self._cycle_status}, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C, Heating: {self._is_heating}")
 

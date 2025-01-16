@@ -15,7 +15,7 @@ logger:
   logs:
     custom_components.smart_thermostat: debug
     custom_components.smart_thermostat.climate: debug
-    custom_components.smartir: debug
+    custom_components.smartir: critical
     homeassistant.components.climate: debug
     homeassistant.core: info
   filters:
