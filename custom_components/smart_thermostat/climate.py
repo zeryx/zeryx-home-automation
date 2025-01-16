@@ -370,30 +370,37 @@ class SmartThermostat(ClimateEntity):
     async def _switch_heat_source(self, source):
         """Switch between heat pump and furnace."""
         try:
+            # First turn off both heat sources
+            if self._heat_pump_entity:
+                await self._hass.services.async_call(
+                    'climate', 'set_hvac_mode',
+                    {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
+                )
+            if self._hvac_entity:
+                await self._hass.services.async_call(
+                    'climate', 'set_hvac_mode',
+                    {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
+                )
+            
+            # Small delay to ensure both are off
+            await asyncio.sleep(1)
+            
             if source == "furnace":
-                # First ensure heat pump is off
-                if self._heat_pump_entity:
+                # Only activate furnace if we're in heat mode
+                if self._hvac_mode == HVACMode.HEAT and self._hvac_entity:
                     await self._hass.services.async_call(
                         'climate', 'set_hvac_mode',
-                        {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
+                        {'entity_id': self._hvac_entity, 'hvac_mode': 'heat'}
+                    )
+                    await self._hass.services.async_call(
+                        'climate', 'set_temperature',
+                        {'entity_id': self._hvac_entity, 'temperature': self._max_temp}
                     )
                 self._add_action("Switching to furnace due to low outdoor temperature")
                 
             elif source == "heat_pump":
-                # First ensure furnace is off
-                if self._hvac_entity:
-                    await self._hass.services.async_call(
-                        'climate', 'set_hvac_mode',
-                        {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
-                    )
-                    # Wait for furnace cycle to complete if it's currently heating
-                    if self._is_heating:
-                        self._is_heating = False
-                        self._hvac_action = HVACAction.OFF
-                        self._heating_start_time = None
-                        
-                # Then activate heat pump with retries
-                if self._heat_pump_entity:
+                # Then activate heat pump with retries only if we're in heat mode
+                if self._heat_pump_entity and self._hvac_mode == HVACMode.HEAT:
                     max_retries = 3
                     retry_count = 0
                     success = False
@@ -419,8 +426,9 @@ class SmartThermostat(ClimateEntity):
                             )
                             
                             # Verify the temperature was set correctly
+                            await asyncio.sleep(1)  # Give time for state to update
                             heat_pump_state = self._hass.states.get(self._heat_pump_entity)
-                            if heat_pump_state and heat_pump_state.attributes.get('temperature') == self._target_temperature:
+                            if heat_pump_state and abs(float(heat_pump_state.attributes.get('temperature', 0)) - self._target_temperature) < 0.1:
                                 success = True
                                 self._add_action(f"Successfully set heat pump temperature to {self._target_temperature}°C")
                             else:
@@ -434,9 +442,9 @@ class SmartThermostat(ClimateEntity):
                             else:
                                 self._add_action(f"Failed to set heat pump temperature after {max_retries} attempts: {str(e)}")
                                 raise  # Re-raise the last exception
-                    
-                self._add_action("Switching to heat pump due to moderate outdoor temperature")
                 
+                self._add_action("Switching to heat pump due to moderate outdoor temperature")
+
         except Exception as e:
             self._add_action(f"Error during heat source switch: {str(e)}")
             # Reset active source on error
