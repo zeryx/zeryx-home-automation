@@ -451,11 +451,55 @@ class SmartThermostat(ClimateEntity):
             self._active_heat_source = None
             raise  # Re-raise the exception to ensure proper error handling
 
+    async def _determine_optimal_fan_mode(self, current_temps: dict) -> str:
+        """Determine optimal fan mode based on temperature spread across sensors."""
+        if not current_temps:
+            return "auto"  # Default to auto if no sensor data available
+        
+        temp_spread = max(current_temps.values()) - min(current_temps.values())
+        avg_temp = sum(current_temps.values()) / len(current_temps)
+        temp_delta = abs(self._target_temperature - avg_temp)
+        
+        # If large temperature spread between sensors or far from target, use high
+        if temp_spread > 1.5 or temp_delta > 2.0:
+            return "high"
+        # If moderate spread or moderate distance from target, use medium
+        elif temp_spread > 0.8 or temp_delta > 1.0:
+            return "medium"
+        # Otherwise use low for efficiency
+        else:
+            return "low"
+
     async def _control_heating(self):
         """Control the heating based on temperature."""
         await self._check_outdoor_temperature()
         
         if self._active_heat_source == "heat_pump":
+            now = datetime.now()
+            
+            # Check if it's time to adjust fan mode (using off_time as check interval)
+            should_check_fan = (
+                not hasattr(self, '_last_fan_check') or 
+                (now - getattr(self, '_last_fan_check')).total_seconds() >= self._off_time
+            )
+            
+            if should_check_fan and self._hvac_mode == HVACMode.HEAT:
+                self._last_fan_check = now
+                optimal_fan_mode = await self._determine_optimal_fan_mode(self._sensor_temperatures)
+                
+                try:
+                    await self._hass.services.async_call(
+                        'climate', 'set_fan_mode',
+                        {
+                            'entity_id': self._heat_pump_entity,
+                            'fan_mode': optimal_fan_mode
+                        }
+                    )
+                    self._cycle_status = optimal_fan_mode
+                    self._add_action(f"Set heat pump fan mode to {optimal_fan_mode}")
+                except Exception as e:
+                    self._add_action(f"Failed to set fan mode: {str(e)}")
+            
             # Skip furnace control logic when heat pump is active
             return
             
