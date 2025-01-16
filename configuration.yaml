@@ -13,14 +13,13 @@ homeassistant:
 logger:
   default: info
   logs:
-    custom_components.smart_thermostat: info
-    custom_components.smart_thermostat.climate: info
-    custom_components.smartir: critical
+    custom_components.smart_thermostat: debug
+    custom_components.smart_thermostat.climate: debug
+    custom_components.smartir: debug
+    homeassistant.components.climate: debug
+    homeassistant.core: info
   filters:
-    async_track_state_change_filter:
-      - "Detected that custom integration 'smartir' calls `async_track_state_change`"
-    ignore_custom_components:
-      - "We found a custom integration"
+    ignore_custom_components: []
 
 
 smartir:
@@ -40,7 +39,8 @@ climate:
       - sensor.office_temperature
       - sensor.thermostat_current_temperature
       - sensor.hvac_controller_temperature
-    hvac_entity: climate.thermostat
+    # hvac_entity: climate.thermostat
+    hvac_entity: climate.office_ac
     target_temp: 21.0
     min_temp: 19.0
     max_temp: 22.5

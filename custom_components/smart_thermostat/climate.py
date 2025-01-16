@@ -94,7 +94,18 @@ class SmartThermostat(ClimateEntity):
         timestamp = datetime.now().strftime("%H:%M:%S")
         message = f"[{timestamp}] {action}"
         self._action_history.appendleft(message)
-        _LOGGER.debug(message)
+        
+        # Add more detailed logging
+        _LOGGER.debug(
+            "Smart Thermostat Action - Name: %s, Action: %s, Current Temp: %.1f, "
+            "Target: %.1f, Mode: %s, Status: %s",
+            self._name,
+            action,
+            self._current_temperature if self._current_temperature is not None else -999,
+            self._target_temperature,
+            self._hvac_mode,
+            self._cycle_status
+        )
         
     def _is_sensor_fresh(self, sensor_id: str) -> bool:
         """Check if sensor data is fresh (within last 5 minutes)."""
@@ -293,6 +304,16 @@ class SmartThermostat(ClimateEntity):
 
     async def _control_heating(self):
         """Control the heating based on temperature."""
+        _LOGGER.debug(
+            "Control Heating Check - Name: %s, Current Temp: %.1f, Target: %.1f, "
+            "Is Heating: %s, Cycle Status: %s, Learning Duration: %.1f min",
+            self._name,
+            self.current_temperature if self.current_temperature is not None else -999,
+            self._target_temperature,
+            self._is_heating,
+            self._cycle_status,
+            self._learning_heating_duration / 60
+        )
         if not self._hvac_entity or self._hvac_mode == HVACMode.OFF:
             self._cycle_status = "off"
             self._is_heating = False
