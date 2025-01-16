@@ -13,8 +13,9 @@ homeassistant:
 logger:
   default: info
   logs:
-    custom_components.smart_thermostat: debug
-    custom_components.smart_thermostat.climate: debug
+    custom_components.smart_thermostat: info
+    custom_components.smart_thermostat.climate: info
+    custom_components.smartir: critical
   filters:
     async_track_state_change_filter:
       - "Detected that custom integration 'smartir' calls `async_track_state_change`"
