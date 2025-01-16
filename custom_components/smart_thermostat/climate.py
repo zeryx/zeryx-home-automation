@@ -387,5 +387,5 @@ class SmartThermostat(ClimateEntity):
         # Update temperature before controlling heating
         self.current_temperature
         await self._control_heating()
-        # Schedule next update sooner
-        self.async_schedule_update_ha_state(True) 
+        # Schedule next update with force_refresh=True
+        await self.async_schedule_update_ha_state(force_refresh=True) 
