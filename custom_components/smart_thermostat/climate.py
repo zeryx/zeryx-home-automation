@@ -294,6 +294,9 @@ class SmartThermostat(ClimateEntity):
     async def _control_heating(self):
         """Control the heating based on temperature."""
         if not self._hvac_entity or self._hvac_mode == HVACMode.OFF:
+            self._cycle_status = "off"
+            self._is_heating = False
+            self._hvac_action = HVACAction.OFF
             self._add_action("Control skipped: HVAC is off or no entity")
             self.async_write_ha_state()
             return
@@ -312,16 +315,17 @@ class SmartThermostat(ClimateEntity):
         if self._heating_start_time and self._is_heating:
             heating_elapsed = (now - self._heating_start_time).total_seconds()
             if heating_elapsed >= self._learning_heating_duration:
-                self._cycle_status = "off_period"
+                # Force heating off and ensure state is updated
                 await self._hass.services.async_call(
                     'climate', 'set_hvac_mode',
                     {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
                 )
                 self._is_heating = False
                 self._hvac_action = HVACAction.OFF
-                self._cooling_start_time = now
                 self._heating_start_time = None
-                self._add_action(f"Completed heating cycle, starting {self._off_time/60:.1f}min off period")
+                self._cooling_start_time = now
+                self._cycle_status = "cooling"
+                self._add_action(f"Completed heating cycle, starting {self._off_time/60:.1f}min cooling period")
                 self.async_write_ha_state()
                 return
 
