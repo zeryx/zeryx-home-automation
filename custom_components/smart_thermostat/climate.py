@@ -314,6 +314,7 @@ class SmartThermostat(ClimateEntity):
             self._cycle_status,
             self._learning_heating_duration / 60
         )
+
         if not self._hvac_entity or self._hvac_mode == HVACMode.OFF:
             self._cycle_status = "off"
             self._is_heating = False
@@ -333,15 +334,22 @@ class SmartThermostat(ClimateEntity):
         # If we're not in any cycle and not cooling, ensure we're in ready state
         if not self._is_heating and not self._cooling_start_time:
             self._cycle_status = "ready"
+            self._add_action(f"Status: ready, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C, Heating: {self._is_heating}")
 
-        # Add detailed status logging
-        self._add_action(f"Status: {self._cycle_status}, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C, Heating: {self._is_heating}")
+        # Start new heating cycle if needed and not in cooling period
+        if (current_temp < (self._target_temperature - self._tolerance) and 
+            self._hvac_mode == HVACMode.HEAT and
+            not self._is_heating and 
+            not self._cooling_start_time):
+            
+            await self._start_heating_cycle(now, current_temp)
+            self.async_write_ha_state()
+            return
 
         # Check if heating cycle is complete
         if self._heating_start_time and self._is_heating:
             heating_elapsed = (now - self._heating_start_time).total_seconds()
             if heating_elapsed >= self._learning_heating_duration:
-                # Force heating off and ensure state is updated
                 await self._hass.services.async_call(
                     'climate', 'set_hvac_mode',
                     {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
@@ -355,7 +363,7 @@ class SmartThermostat(ClimateEntity):
                 self.async_write_ha_state()
                 return
 
-        # Check if off period is complete
+        # Check if cooling period is complete
         if self._cooling_start_time and not self._is_heating:
             cooling_elapsed = (now - self._cooling_start_time).total_seconds()
             self._add_action(f"Off period: {cooling_elapsed:.1f}s of {self._off_time}s ({cooling_elapsed/60:.1f}min of {self._off_time/60:.1f}min)")
@@ -391,14 +399,8 @@ class SmartThermostat(ClimateEntity):
                 if current_temp < (self._target_temperature - self._tolerance):
                     self._add_action(f"Temperature {current_temp:.1f}°C below target {self._target_temperature}°C - starting new heating cycle")
                     await self._start_heating_cycle(now, current_temp)
+                self.async_write_ha_state()
                 return
-
-        # Start new heating cycle if needed and not in cooling period
-        if (current_temp < (self._target_temperature - self._tolerance) and 
-            not self._is_heating and 
-            not self._cooling_start_time):  # Only if not in cooling period
-            
-            await self._start_heating_cycle(now, current_temp)
 
     async def _start_heating_cycle(self, now, current_temp):
         """Helper method to start a new heating cycle."""
