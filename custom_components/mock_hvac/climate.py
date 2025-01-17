@@ -29,7 +29,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Mock HVAC climate devices."""
-    async_add_entities([MockFurnace(hass), MockHeatPump(hass)])
+    furnace = MockFurnace(hass)
+    heat_pump = MockHeatPump(hass)
+    
+    _LOGGER.debug("Setting up Mock HVAC entities: %s, %s", furnace.entity_id, heat_pump.entity_id)
+    async_add_entities([furnace, heat_pump])
 
 class MockFurnace(ClimateEntity):
     """Mock Ecobee thermostat entity."""
@@ -110,7 +114,7 @@ class MockHeatPump(ClimateEntity):
             ClimateEntityFeature.TARGET_TEMPERATURE |
             ClimateEntityFeature.FAN_MODE
         )
-        self._attr_fan_modes = ["low", "mid", "high", "auto"]
+        self._attr_fan_modes = ["low", "medium", "mid", "high", "auto"]
         self._attr_fan_mode = "high"
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
 
