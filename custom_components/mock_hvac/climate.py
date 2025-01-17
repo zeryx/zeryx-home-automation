@@ -36,7 +36,8 @@ class MockFurnace(ClimateEntity):
     
     _attr_has_entity_name = True
     _attr_name = "Mock Furnace"
-    _attr_unique_id = "mock_furnace_001"
+    _attr_unique_id = "mock_furnace"
+    _attr_entity_id = "climate.mock_furnace"
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the mock furnace."""
@@ -86,7 +87,8 @@ class MockHeatPump(ClimateEntity):
     
     _attr_has_entity_name = True
     _attr_name = "Mock Heat Pump"
-    _attr_unique_id = "mock_heatpump_001"
+    _attr_unique_id = "mock_heatpump"
+    _attr_entity_id = "climate.mock_heatpump"
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the mock heat pump."""

@@ -41,8 +41,8 @@ climate:
       - sensor.office_temperature
       - sensor.thermostat_current_temperature
       - sensor.hvac_controller_temperature
-    hvac_entity: climate.mock_furnace
-    heat_pump_entity: climate.mock_heatpump
+    hvac_entity: climate.mock_furnace_mock_furnace
+    heat_pump_entity: climate.mock_heat_pump_mock_heat_pump
     target_temp: 21.0
     min_temp: 19.0
     max_temp: 22.5
