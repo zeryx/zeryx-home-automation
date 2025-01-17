@@ -18,12 +18,20 @@ logger:
     custom_components.smartir: critical
     homeassistant.components.climate: debug
     homeassistant.core: info
+    custom_components.mock_hvac: debug
+    custom_components.mock_hvac.climate: debug
   filters:
     ignore_custom_components: []
 
 
 smartir:
 climate:
+  - platform: mock_hvac
+    name: "Mock Furnace"
+    unique_id: mock_furnace
+  - platform: mock_hvac
+    name: "Mock Heat Pump"
+    unique_id: mock_heatpump
   - platform: smartir
     name: "Heat pump"
     unique_id: kitchen_heat_pump

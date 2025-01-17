@@ -72,12 +72,14 @@ class MockFurnace(ClimateEntity):
             self._attr_hvac_mode = hvac_mode
             self._attr_hvac_action = HVACAction.HEATING if hvac_mode == HVACMode.HEAT else HVACAction.IDLE
             self.async_write_ha_state()
+            _LOGGER.info("HVAC mode set to %s", self._attr_hvac_mode)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         if ATTR_TEMPERATURE in kwargs:
             self._attr_target_temperature = kwargs[ATTR_TEMPERATURE]
             self.async_write_ha_state()
+            _LOGGER.info("Temperature set to %s", self._attr_target_temperature)
 
 class MockHeatPump(ClimateEntity):
     """Mock Lennox heat pump entity."""
@@ -125,15 +127,18 @@ class MockHeatPump(ClimateEntity):
         if hvac_mode in self.hvac_modes:
             self._attr_hvac_mode = hvac_mode
             self.async_write_ha_state()
+            _LOGGER.info("HVAC mode set to %s", self._attr_hvac_mode)
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         if ATTR_TEMPERATURE in kwargs:
             self._attr_target_temperature = kwargs[ATTR_TEMPERATURE]
             self.async_write_ha_state()
+            _LOGGER.info("Temperature set to %s", self._attr_target_temperature)
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set new target fan mode."""
         if fan_mode in self.fan_modes:
             self._attr_fan_mode = fan_mode
-            self.async_write_ha_state() 
+            self.async_write_ha_state()
+            _LOGGER.info("Fan mode set to %s", self._attr_fan_mode) 
