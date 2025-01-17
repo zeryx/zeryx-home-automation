@@ -105,6 +105,7 @@ class SmartThermostat(ClimateEntity):
         self._heat_pump_max_temp = heat_pump_max_temp
         self._active_heat_source = None
         self._last_forecast_check = None
+        self._system_enabled = True  # New state variable for system operational status
 
     def _add_action(self, action: str):
         """Add an action to the history and log it."""
@@ -275,7 +276,8 @@ class SmartThermostat(ClimateEntity):
         """Set new target hvac mode."""
         if hvac_mode not in self.hvac_modes:
             return
-        
+            
+        # Update mode first
         self._hvac_mode = hvac_mode
         
         # Turn off both systems first
@@ -290,14 +292,22 @@ class SmartThermostat(ClimateEntity):
                 {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
             )
         
-        # If turning off, update states and return
+        # If turning off, update all states and return
         if hvac_mode == HVACMode.OFF:
+            # Disable the smart thermostat system
+            self._system_enabled = False
             self._hvac_action = HVACAction.OFF
             self._is_heating = False
             self._active_heat_source = None
-            self._add_action("System turned off")
+            self._heating_start_time = None
+            self._cooling_start_time = None
+            self._cycle_status = "off"
+            self._add_action("Smart thermostat disabled - systems available for manual control")
             self.async_write_ha_state()
             return
+            
+        # System is being enabled
+        self._system_enabled = True
         
         # If turning on, determine appropriate heat source and activate it
         await self._check_outdoor_temperature()
@@ -494,8 +504,37 @@ class SmartThermostat(ClimateEntity):
 
     async def _control_heating(self):
         """Control the heating based on temperature."""
+        # Always update outdoor temperature and current temperature readings,
+        # even when system is disabled
         await self._check_outdoor_temperature()
-        
+        current_temp = self.current_temperature
+
+        # If system is disabled, ensure all heating systems are off and states are reset
+        if not self._system_enabled:
+            if self._is_heating:
+                # Turn off both heating systems
+                if self._hvac_entity:
+                    await self._hass.services.async_call(
+                        'climate', 'set_hvac_mode',
+                        {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
+                    )
+                if self._heat_pump_entity:
+                    await self._hass.services.async_call(
+                        'climate', 'set_hvac_mode',
+                        {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
+                    )
+                
+                # Reset heating states
+                self._is_heating = False
+                self._heating_start_time = None
+                self._cooling_start_time = None
+                self._hvac_action = HVACAction.OFF
+                self._cycle_status = "disabled"
+                self._add_action("System disabled - heating systems turned off")
+                self.async_write_ha_state()
+            return
+            
+        # Rest of the existing control logic
         if self._active_heat_source == "heat_pump":
             now = datetime.now()
             
