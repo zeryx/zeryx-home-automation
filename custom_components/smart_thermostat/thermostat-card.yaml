@@ -3,38 +3,12 @@ cards:
   - type: custom:mushroom-template-card
     primary: Smart Furnace Status
     secondary: >
-      {% if states('climate.smart_furnace') == 'off' %}
-        Off
-      {% elif states('climate.smart_furnace') == 'heat' %}
-        {% if state_attr('climate.smart_furnace', 'hvac_action') == 'heating' %}
-          Heating
-        {% else %}
-          Idle
-        {% endif %}
-      {% else %}
-        {{ states('climate.smart_furnace') }}
-      {% endif %}
-    icon: >
-      {% if states('climate.smart_furnace') == 'heat' and state_attr('climate.smart_furnace', 'hvac_action') == 'heating' %}
-        mdi:fire
-      {% elif states('climate.smart_furnace') == 'heat' %}
-        mdi:thermostat
-      {% else %}
-        mdi:hvac-off
-      {% endif %}
+      {{ states('climate.smart_furnace') }}
+    icon: mdi:thermostat
     fill_container: true
     entity: climate.smart_furnace
     tap_action:
-      action: call-service
-      service: climate.set_hvac_mode
-      service_data:
-        entity_id: climate.smart_furnace
-        hvac_mode: >
-          {% if states('climate.smart_furnace') == 'off' %}
-            heat
-          {% else %}
-            off
-          {% endif %}
+      action: toggle
     hold_action:
       action: more-info
     
@@ -101,7 +75,7 @@ cards:
   - type: custom:mushroom-climate-card
     entity: climate.smart_furnace
     fill_container: true
-    show_temperature_control: true
+    show_temperature_control: false
     hvac_modes:
       - "off"
       - "heat"
@@ -199,3 +173,56 @@ cards:
             Unknown
           {% endif %}
         icon: mdi:brain 
+
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Force Mode
+        secondary: >
+          {% set force = state_attr('climate.smart_furnace', 'force_mode') %}
+          {% if force %}
+            {{ force|title }}
+          {% else %}
+            Auto
+          {% endif %}
+        icon: >
+          {% set force = state_attr('climate.smart_furnace', 'force_mode') %}
+          {% if force == 'heat_pump' %}
+            mdi:heat-pump
+          {% elif force == 'furnace' %}
+            mdi:radiator
+          {% else %}
+            mdi:auto-fix
+          {% endif %}
+        
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-template-card
+            primary: Heat Pump
+            icon: mdi:heat-pump
+            tap_action:
+              action: call-service
+              service: climate.set_temperature
+              service_data:
+                entity_id: climate.smart_furnace
+                force_mode: heat_pump
+            
+          - type: custom:mushroom-template-card
+            primary: Auto
+            icon: mdi:auto-fix
+            tap_action:
+              action: call-service
+              service: climate.set_temperature
+              service_data:
+                entity_id: climate.smart_furnace
+                force_mode: null
+            
+          - type: custom:mushroom-template-card
+            primary: Furnace
+            icon: mdi:radiator
+            tap_action:
+              action: call-service
+              service: climate.set_temperature
+              service_data:
+                entity_id: climate.smart_furnace
+                force_mode: furnace 

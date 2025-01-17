@@ -54,6 +54,29 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             _LOGGER.error("Failed to turn off thermostat %s: %s", entity_id, str(err))
             raise
 
+    async def async_handle_force_mode(call: ServiceCall) -> None:
+        """Handle forcing a specific heat source."""
+        entity_id = call.data.get("entity_id")
+        force_mode = call.data.get("force_mode")
+        
+        if entity_id is None:
+            raise ValueError("entity_id must be provided")
+
+        ent_reg = entity_registry.async_get(hass)
+        entity = ent_reg.async_get(entity_id)
+        if not entity:
+            raise ValueError(f"Entity {entity_id} not found")
+
+        try:
+            thermostat = hass.data[DOMAIN][entity.unique_id]
+            await thermostat.async_force_heat_source(force_mode)
+        except KeyError:
+            _LOGGER.error("Thermostat %s not found", entity_id)
+            raise
+        except HomeAssistantError as err:
+            _LOGGER.error("Failed to set force mode for %s: %s", entity_id, str(err))
+            raise
+
     try:
         # Register our services with error handling
         hass.services.async_register(
@@ -61,6 +84,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         )
         hass.services.async_register(
             DOMAIN, "turn_off", async_handle_turn_off
+        )
+        hass.services.async_register(
+            DOMAIN, "force_mode", async_handle_force_mode
         )
         return True
     except Exception as e:

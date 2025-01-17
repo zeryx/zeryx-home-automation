@@ -106,6 +106,9 @@ class SmartThermostat(ClimateEntity):
         self._active_heat_source = None
         self._last_forecast_check = None
         self._system_enabled = True  # New state variable for system operational status
+        
+        # Add force mode tracking
+        self._force_mode = None
 
     def _add_action(self, action: str):
         """Add an action to the history and log it."""
@@ -249,7 +252,7 @@ class SmartThermostat(ClimateEntity):
             self._time_remaining = 0
             cycle_type = "idle"
 
-        return {
+        attributes = {
             "action_history": list(self._action_history),
             "sensor_temperatures": self._sensor_temperatures,
             "average_temperature": self._current_temperature,
@@ -260,8 +263,11 @@ class SmartThermostat(ClimateEntity):
             "cycle_status": self._cycle_status,
             "time_remaining": round(self._time_remaining / 60, 1),
             "cycle_type": cycle_type,
-            "off_time": round(self._off_time / 60, 1)
+            "off_time": round(self._off_time / 60, 1),
+            "force_mode": self._force_mode,  # Add force mode to attributes
         }
+
+        return attributes
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
@@ -352,6 +358,10 @@ class SmartThermostat(ClimateEntity):
 
     async def _check_outdoor_temperature(self):
         """Check outdoor temperature and select appropriate heat source."""
+        # Skip temperature check if force mode is active
+        if self._force_mode:
+            return
+            
         now = datetime.now(timezone.utc)
         
         # Check forecast once per hour
@@ -681,7 +691,27 @@ class SmartThermostat(ClimateEntity):
     async def async_update(self):
         """Update the current temperature and control heating."""
         # Update temperature before controlling heating
-        self.current_temperature
+        current_temp = self.current_temperature  # Store the result so it's actually used
+        if current_temp is not None:
+            self._current_temperature = current_temp  # Update the internal state
         await self._control_heating()
         # Schedule next update with force_refresh=True, but don't await it
         self.async_schedule_update_ha_state(force_refresh=True) 
+
+    async def async_force_heat_source(self, source: str) -> None:
+        """Force a specific heat source."""
+        if source not in ["heat_pump", "furnace", None]:
+            raise ValueError("Invalid heat source specified")
+            
+        self._force_mode = source
+        if source:
+            self._add_action(f"Forcing heat source to {source}")
+            # Immediately switch to forced source if system is enabled
+            if self._system_enabled:
+                await self._switch_heat_source(source)
+        else:
+            self._add_action("Cleared forced heat source")
+            # Return to normal temperature-based selection
+            await self._check_outdoor_temperature()
+        
+        self.async_write_ha_state() 
