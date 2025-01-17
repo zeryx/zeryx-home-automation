@@ -1,77 +1,76 @@
-"""Mock HVAC Platform for testing."""
+"""Mock HVAC climate entities."""
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from homeassistant.components.climate import ClimateEntity
-from homeassistant.components.climate.const import (
-    HVAC_MODE_OFF,
-    HVAC_MODE_HEAT,
-    HVAC_MODE_COOL,
-    HVAC_MODE_HEAT_COOL,
-    HVAC_MODE_DRY,
-    HVAC_MODE_FAN_ONLY,
-    SUPPORT_TARGET_TEMPERATURE,
-    SUPPORT_FAN_MODE,
+from homeassistant.components.climate import (
+    ClimateEntity,
     ClimateEntityFeature,
+    HVACMode,
+    HVACAction,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_TEMPERATURE,
-    TEMP_CELSIUS,
+    UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.helpers.entity import DeviceInfo
+
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
+    config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
-    """Set up the mock climate platform."""
-    async_add_entities([
-        MockFurnace(),
-        MockHeatPump(),
-    ])
+    """Set up the Mock HVAC climate devices."""
+    async_add_entities([MockFurnace(hass), MockHeatPump(hass)])
 
 class MockFurnace(ClimateEntity):
     """Mock Ecobee thermostat entity."""
     
-    def __init__(self):
+    _attr_has_entity_name = True
+    _attr_name = "Mock Furnace"
+    _attr_unique_id = "mock_furnace_001"
+
+    def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the mock furnace."""
-        self._attr_hvac_modes = [HVAC_MODE_OFF, HVAC_MODE_HEAT, HVAC_MODE_COOL, HVAC_MODE_HEAT_COOL]
+        self.hass = hass
+        self._attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL, HVACMode.HEAT_COOL]
         self._attr_min_temp = 7
         self._attr_max_temp = 35
-        self._attr_min_humidity = 20
-        self._attr_max_humidity = 50
-        self._attr_fan_modes = ["on", "auto"]
         self._attr_current_temperature = 19.8
         self._attr_target_temperature = None
-        self._attr_target_temperature_high = None
-        self._attr_target_temperature_low = None
-        self._attr_current_humidity = 43
-        self._attr_humidity = 36
-        self._attr_fan_mode = "auto"
-        self._attr_hvac_action = "idle"
-        self._attr_hvac_mode = HVAC_MODE_OFF
-        self._attr_name = "Mock Furnace"
+        self._attr_hvac_mode = HVACMode.OFF
+        self._attr_hvac_action = HVACAction.IDLE
         self._attr_supported_features = (
             ClimateEntityFeature.TARGET_TEMPERATURE |
             ClimateEntityFeature.FAN_MODE
         )
-        self._attr_temperature_unit = TEMP_CELSIUS
-        self._attr_unique_id = "mock_furnace_001"
+        self._attr_fan_modes = ["on", "auto"]
+        self._attr_fan_mode = "auto"
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
+        
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.unique_id)},
+            name=self.name,
+            manufacturer="Mock Manufacturer",
+            model="Mock Furnace v1",
+        )
 
-    async def async_set_hvac_mode(self, hvac_mode: str) -> None:
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
         if hvac_mode in self.hvac_modes:
             self._attr_hvac_mode = hvac_mode
-            self._attr_hvac_action = "heating" if hvac_mode == HVAC_MODE_HEAT else "idle"
+            self._attr_hvac_action = HVACAction.HEATING if hvac_mode == HVACMode.HEAT else HVACAction.IDLE
             self.async_write_ha_state()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
@@ -83,45 +82,48 @@ class MockFurnace(ClimateEntity):
 class MockHeatPump(ClimateEntity):
     """Mock Lennox heat pump entity."""
     
-    def __init__(self):
+    _attr_has_entity_name = True
+    _attr_name = "Mock Heat Pump"
+    _attr_unique_id = "mock_heatpump_001"
+
+    def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the mock heat pump."""
+        self.hass = hass
         self._attr_hvac_modes = [
-            HVAC_MODE_OFF,
-            HVAC_MODE_HEAT_COOL,
-            HVAC_MODE_COOL,
-            HVAC_MODE_DRY,
-            HVAC_MODE_HEAT,
-            HVAC_MODE_FAN_ONLY
+            HVACMode.OFF,
+            HVACMode.HEAT_COOL,
+            HVACMode.COOL,
+            HVACMode.DRY,
+            HVACMode.HEAT,
+            HVACMode.FAN_ONLY
         ]
         self._attr_min_temp = 17
         self._attr_max_temp = 30
-        self._attr_target_temperature_step = 1
-        self._attr_fan_modes = ["low", "mid", "high", "auto"]
         self._attr_current_temperature = 19.8
         self._attr_target_temperature = 21
-        self._attr_current_humidity = 42.24
-        self._attr_fan_mode = "high"
-        self._attr_last_on_operation = "heat"
-        self._attr_device_code = "2161"
-        self._attr_manufacturer = "Lennox"
-        self._attr_supported_models = ["LNMTE026V2"]
-        self._attr_supported_controller = "Broadlink"
-        self._attr_commands_encoding = "Base64"
-        self._attr_name = "Mock Heat Pump"
+        self._attr_hvac_mode = HVACMode.OFF
         self._attr_supported_features = (
             ClimateEntityFeature.TARGET_TEMPERATURE |
             ClimateEntityFeature.FAN_MODE
         )
-        self._attr_temperature_unit = TEMP_CELSIUS
-        self._attr_unique_id = "mock_heatpump_001"
-        self._attr_hvac_mode = HVAC_MODE_OFF
+        self._attr_fan_modes = ["low", "mid", "high", "auto"]
+        self._attr_fan_mode = "high"
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
 
-    async def async_set_hvac_mode(self, hvac_mode: str) -> None:
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.unique_id)},
+            name=self.name,
+            manufacturer="Lennox",
+            model="Mock Heat Pump v1",
+        )
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
         if hvac_mode in self.hvac_modes:
             self._attr_hvac_mode = hvac_mode
-            if hvac_mode == HVAC_MODE_HEAT:
-                self._attr_last_on_operation = "heat"
             self.async_write_ha_state()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:

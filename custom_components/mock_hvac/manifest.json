@@ -1,6 +1,7 @@
 {
   "domain": "mock_hvac",
   "name": "Mock HVAC",
+  "config_flow": true,
   "documentation": "https://github.com/your_username/your_repo",
   "dependencies": [],
   "codeowners": [],
