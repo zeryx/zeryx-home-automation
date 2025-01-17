@@ -29,11 +29,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Mock HVAC climate devices."""
+    _LOGGER.debug("Setting up Mock HVAC integration")
+    
     furnace = MockFurnace(hass)
     heat_pump = MockHeatPump(hass)
     
-    _LOGGER.debug("Setting up Mock HVAC entities: %s, %s", furnace.entity_id, heat_pump.entity_id)
-    async_add_entities([furnace, heat_pump])
+    _LOGGER.info("Adding Mock HVAC entities with unique_ids: %s, %s", 
+                furnace.unique_id, heat_pump.unique_id)
+    
+    async_add_entities([furnace, heat_pump], True)  # True for update before adding
 
 class MockFurnace(ClimateEntity):
     """Mock Ecobee thermostat entity."""
@@ -41,10 +45,10 @@ class MockFurnace(ClimateEntity):
     _attr_has_entity_name = True
     _attr_name = "Mock Furnace"
     _attr_unique_id = "mock_furnace"
-    _attr_entity_id = "climate.mock_furnace"
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the mock furnace."""
+        super().__init__()
         self.hass = hass
         self._attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL, HVACMode.HEAT_COOL]
         self._attr_min_temp = 7
@@ -92,10 +96,10 @@ class MockHeatPump(ClimateEntity):
     _attr_has_entity_name = True
     _attr_name = "Mock Heat Pump"
     _attr_unique_id = "mock_heatpump"
-    _attr_entity_id = "climate.mock_heatpump"
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the mock heat pump."""
+        super().__init__()
         self.hass = hass
         self._attr_hvac_modes = [
             HVACMode.OFF,
