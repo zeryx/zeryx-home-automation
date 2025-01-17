@@ -202,7 +202,7 @@ cards:
             icon: mdi:heat-pump
             tap_action:
               action: call-service
-              service: climate.set_temperature
+              service: smart_thermostat.force_mode
               service_data:
                 entity_id: climate.smart_furnace
                 force_mode: heat_pump
@@ -212,7 +212,7 @@ cards:
             icon: mdi:auto-fix
             tap_action:
               action: call-service
-              service: climate.set_temperature
+              service: smart_thermostat.force_mode
               service_data:
                 entity_id: climate.smart_furnace
                 force_mode: null
@@ -222,7 +222,7 @@ cards:
             icon: mdi:radiator
             tap_action:
               action: call-service
-              service: climate.set_temperature
+              service: smart_thermostat.force_mode
               service_data:
                 entity_id: climate.smart_furnace
                 force_mode: furnace 
