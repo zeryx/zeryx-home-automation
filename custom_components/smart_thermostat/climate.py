@@ -351,13 +351,15 @@ class SmartThermostat(ClimateEntity):
         # System is being enabled
         self._system_enabled = True
         
+        # Check outdoor temperature before determining heat source
+        await self._check_outdoor_temperature()
+        
         # If turning on, determine appropriate heat source and activate it
         if self._force_mode:
             self._active_heat_source = self._force_mode
             self._add_action(f"Using forced heat source: {self._force_mode}")
-        else:
-            await self._check_outdoor_temperature()
         
+        # Ensure heat source is set and activated immediately
         if self._active_heat_source == "furnace":
             if self._hvac_entity:
                 await self._send_command(
@@ -373,7 +375,6 @@ class SmartThermostat(ClimateEntity):
                 self._add_action("Activated furnace heating")
         elif self._active_heat_source == "heat_pump":
             if self._heat_pump_entity:
-                # Ensure heat pump is in heat mode first
                 await self._send_command(
                     self._heat_pump_entity,
                     'set_hvac_mode',
@@ -381,7 +382,6 @@ class SmartThermostat(ClimateEntity):
                 )
                 await asyncio.sleep(self._command_delay)
                 
-                # Set the target temperature
                 await self._send_command(
                     self._heat_pump_entity,
                     'set_temperature',
@@ -389,6 +389,8 @@ class SmartThermostat(ClimateEntity):
                 )
                 self._add_action("Activated heat pump heating")
         
+        # Immediately check if heating is needed
+        await self._control_heating()
         self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
@@ -430,11 +432,7 @@ class SmartThermostat(ClimateEntity):
             else:
                 # In transition zone - make an intelligent choice based on current source
                 # If no current source, prefer heat pump as it's generally more efficient
-                if self._active_heat_source is None:
-                    new_source = "heat_pump"
-                else:
-                    # Keep current source to prevent frequent switching
-                    new_source = self._active_heat_source
+                new_source = "heat_pump"
                 
             # Log transition zone status if applicable
             if self._heat_pump_min_temp < outdoor_temp < self._heat_pump_max_temp:
@@ -442,14 +440,8 @@ class SmartThermostat(ClimateEntity):
             
             if new_source != self._active_heat_source:
                 self._add_action(f"Heat source change needed: {self._active_heat_source} -> {new_source}")
-                # Only switch immediately if we're in the "ready" state
-                if self._cycle_status == "ready":
-                    self._active_heat_source = new_source
-                    await self._switch_heat_source(new_source)
-                else:
-                    # Store the pending change to be executed when current cycle completes
-                    self._pending_heat_source = new_source
-                    self._add_action(f"Heat source change queued for next cycle: {new_source}")
+                self._active_heat_source = new_source
+                await self._switch_heat_source(new_source)
                 
         except ValueError as e:
             self._add_action(f"Error parsing temperature from {self._weather_entity}: {str(e)}")
