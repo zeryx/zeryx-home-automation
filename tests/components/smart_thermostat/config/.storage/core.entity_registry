@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "minor_version": 11,
+  "key": "core.entity_registry",
+  "data": {
+    "entities": [
+      {
+        "aliases": [],
+        "area_id": null,
+        "capabilities": null,
+        "config_entry_id": null,
+        "device_class": null,
+        "device_id": null,
+        "disabled_by": null,
+        "entity_category": null,
+        "entity_id": "climate.smart_furnace",
+        "hidden_by": null,
+        "icon": null,
+        "id": "913775f62f70685f1683102ff8666258",
+        "has_entity_name": false,
+        "name": null,
+        "options": {},
+        "original_device_class": null,
+        "original_icon": null,
+        "original_name": null,
+        "platform": "smart_thermostat",
+        "supported_features": 0,
+        "translation_key": null,
+        "unique_id": "smart_furnace",
+        "unit_of_measurement": null
+      }
+    ],
+    "deleted_entities": []
+  }
+}
