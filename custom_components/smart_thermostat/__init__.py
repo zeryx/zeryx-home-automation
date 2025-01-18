@@ -62,24 +62,39 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         if entity_id is None:
             raise ValueError("entity_id must be provided")
 
-        # Get the entity state directly
-        state = hass.states.get(entity_id)
-        if not state:
-            raise ValueError(f"Entity {entity_id} not found")
-
-        # Find the thermostat instance
-        for unique_id, thermostat in hass.data.get(DOMAIN, {}).items():
-            if thermostat.entity_id == entity_id:
-                await thermostat.async_force_heat_source(force_mode)
-                return
-
-        raise ValueError(f"Thermostat {entity_id} not found in component")
-
-    try:
-        # Initialize the domain data if it doesn't exist
+        # Get the entity registry entry
+        ent_reg = entity_registry.async_get(hass)
+        entity = ent_reg.async_get(entity_id)
+        
+        if not entity:
+            # Try getting the state directly if no registry entry
+            state = hass.states.get(entity_id)
+            if not state:
+                raise ValueError(f"Entity {entity_id} not found")
+        
+        # Initialize domain data if it doesn't exist
         if DOMAIN not in hass.data:
             hass.data[DOMAIN] = {}
+        
+        # Try to find the thermostat instance
+        thermostat = None
+        
+        # First try by unique_id if available
+        if entity and entity.unique_id and entity.unique_id in hass.data[DOMAIN]:
+            thermostat = hass.data[DOMAIN][entity.unique_id]
+        else:
+            # Fall back to searching by entity_id
+            for t in hass.data[DOMAIN].values():
+                if getattr(t, 'entity_id', None) == entity_id:
+                    thermostat = t
+                    break
+        
+        if not thermostat:
+            raise ValueError(f"Thermostat {entity_id} not found in component")
 
+        await thermostat.async_force_heat_source(force_mode)
+
+    try:
         # Register our services with error handling
         hass.services.async_register(
             DOMAIN, "turn_on", async_handle_turn_on

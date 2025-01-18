@@ -38,14 +38,19 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
     heat_pump_max_temp = config.get("heat_pump_max_temp", -3)
     weather_entity = config.get("weather_entity", "weather.forecast_home")
 
-    async_add_entities([
-        SmartThermostat(
-            hass, name, temp_sensors, hvac_entity, heat_pump_entity,
-            min_temp, max_temp, target_temp, tolerance,
-            minimum_on_time, maximum_on_time, off_time,
-            heat_pump_min_temp, heat_pump_max_temp, weather_entity
-        )
-    ])
+    thermostat = SmartThermostat(
+        hass, name, temp_sensors, hvac_entity, heat_pump_entity,
+        min_temp, max_temp, target_temp, tolerance,
+        minimum_on_time, maximum_on_time, off_time,
+        heat_pump_min_temp, heat_pump_max_temp, weather_entity
+    )
+    
+    # Store the thermostat instance in hass.data
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+    hass.data[DOMAIN][name] = thermostat  # Use name as the key since it's unique
+    
+    async_add_entities([thermostat])
 
 class SmartThermostat(ClimateEntity):
     """Smart Thermostat Climate Entity."""
@@ -74,6 +79,15 @@ class SmartThermostat(ClimateEntity):
         self._hvac_mode = HVACMode.OFF
         self._hvac_action = HVACAction.OFF
         self._is_heating = False
+        
+        # Command tracking
+        self._last_command_time = None
+        self._command_delay = 2  # Delay in seconds between commands
+        self._last_heat_pump_mode = None
+        self._last_heat_pump_temp = None
+        self._last_heat_pump_fan = None
+        self._last_furnace_mode = None
+        self._last_furnace_temp = None
         
         # Add supported features
         self._attr_supported_features = (
@@ -409,89 +423,144 @@ class SmartThermostat(ClimateEntity):
             except Exception as e:
                 self._add_action(f"Unexpected error checking outdoor temperature: {str(e)}")
 
-    async def _switch_heat_source(self, source):
-        """Switch between heat pump and furnace."""
-        try:
-            # First turn off both heat sources
-            if self._heat_pump_entity:
-                await self._hass.services.async_call(
-                    'climate', 'set_hvac_mode',
-                    {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
-                )
-            if self._hvac_entity:
-                await self._hass.services.async_call(
-                    'climate', 'set_hvac_mode',
-                    {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
-                )
-            
-            # Small delay to ensure both are off
-            await asyncio.sleep(1)
-            
-            if source == "furnace":
-                # Only activate furnace if we're in heat mode
-                if self._hvac_mode == HVACMode.HEAT and self._hvac_entity:
-                    await self._hass.services.async_call(
-                        'climate', 'set_hvac_mode',
-                        {'entity_id': self._hvac_entity, 'hvac_mode': 'heat'}
-                    )
-                    await self._hass.services.async_call(
-                        'climate', 'set_temperature',
-                        {'entity_id': self._hvac_entity, 'temperature': self._max_temp}
-                    )
-                self._add_action("Switching to furnace due to low outdoor temperature")
-                
-            elif source == "heat_pump":
-                # Then activate heat pump with retries only if we're in heat mode
-                if self._heat_pump_entity and self._hvac_mode == HVACMode.HEAT:
-                    max_retries = 3
-                    retry_count = 0
-                    success = False
-                    
-                    while retry_count < max_retries and not success:
-                        try:
-                            # First set mode to heat
-                            await self._hass.services.async_call(
-                                'climate', 'set_hvac_mode',
-                                {'entity_id': self._heat_pump_entity, 'hvac_mode': 'heat'}
-                            )
-                            
-                            # Small delay to ensure mode change is processed
-                            await asyncio.sleep(1)
-                            
-                            # Then set the target temperature
-                            await self._hass.services.async_call(
-                                'climate', 'set_temperature',
-                                {
-                                    'entity_id': self._heat_pump_entity,
-                                    'temperature': self._target_temperature
-                                }
-                            )
-                            
-                            # Verify the temperature was set correctly
-                            await asyncio.sleep(1)  # Give time for state to update
-                            heat_pump_state = self._hass.states.get(self._heat_pump_entity)
-                            if heat_pump_state and abs(float(heat_pump_state.attributes.get('temperature', 0)) - self._target_temperature) < 0.1:
-                                success = True
-                                self._add_action(f"Successfully set heat pump temperature to {self._target_temperature}°C")
-                            else:
-                                raise ValueError("Temperature verification failed")
-                                
-                        except Exception as e:
-                            retry_count += 1
-                            if retry_count < max_retries:
-                                self._add_action(f"Retry {retry_count}/{max_retries}: Failed to set heat pump temperature: {str(e)}")
-                                await asyncio.sleep(2)  # Wait before retry
-                            else:
-                                self._add_action(f"Failed to set heat pump temperature after {max_retries} attempts: {str(e)}")
-                                raise  # Re-raise the last exception
-                
-                self._add_action("Switching to heat pump due to moderate outdoor temperature")
+    async def _get_current_state(self, entity_id):
+        """Get current state of an entity."""
+        state = self._hass.states.get(entity_id)
+        if not state:
+            return None
+        return {
+            'state': state.state,
+            'attributes': state.attributes
+        }
 
+    async def _should_send_command(self, entity_id, command_type, new_value):
+        """Check if we should send a command based on current state and timing."""
+        if self._last_command_time:
+            time_since_last = (datetime.now() - self._last_command_time).total_seconds()
+            if time_since_last < self._command_delay:
+                await asyncio.sleep(self._command_delay - time_since_last)
+
+        current_state = await self._get_current_state(entity_id)
+        if not current_state:
+            return True  # If we can't get state, default to sending command
+
+        if entity_id == self._heat_pump_entity:
+            if command_type == 'mode' and self._last_heat_pump_mode == new_value:
+                return False
+            elif command_type == 'temperature' and self._last_heat_pump_temp == new_value:
+                return False
+            elif command_type == 'fan_mode' and self._last_heat_pump_fan == new_value:
+                return False
+        elif entity_id == self._hvac_entity:
+            if command_type == 'mode' and self._last_furnace_mode == new_value:
+                return False
+            elif command_type == 'temperature' and self._last_furnace_temp == new_value:
+                return False
+
+        return True
+
+    async def _send_command(self, entity_id, service, data):
+        """Send command with state tracking and delay."""
+        # Determine command type and value based on data parameters
+        command_type = None
+        command_value = None
+        
+        if 'hvac_mode' in data:
+            command_type = 'mode'
+            command_value = data['hvac_mode']
+        elif 'temperature' in data:
+            command_type = 'temperature'
+            command_value = data['temperature']
+        elif 'fan_mode' in data:
+            command_type = 'fan_mode'
+            command_value = data['fan_mode']
+        else:
+            # If no recognized command type, always send the command
+            command_type = 'other'
+            command_value = None
+
+        should_send = True
+        if command_type != 'other':
+            should_send = await self._should_send_command(entity_id, command_type, command_value)
+        
+        if not should_send:
+            self._add_action(f"Skipping duplicate command to {entity_id}: {service} {data}")
+            return
+
+        # Update last command time
+        self._last_command_time = datetime.now()
+
+        # Update state tracking
+        if entity_id == self._heat_pump_entity:
+            if command_type == 'mode':
+                self._last_heat_pump_mode = command_value
+            elif command_type == 'temperature':
+                self._last_heat_pump_temp = command_value
+            elif command_type == 'fan_mode':
+                self._last_heat_pump_fan = command_value
+        elif entity_id == self._hvac_entity:
+            if command_type == 'mode':
+                self._last_furnace_mode = command_value
+            elif command_type == 'temperature':
+                self._last_furnace_temp = command_value
+
+        # Send the command
+        await self._hass.services.async_call(
+            'climate', service, {
+                'entity_id': entity_id,
+                **data
+            }
+        )
+
+    async def _switch_heat_source(self, source):
+        """Switch between heat pump and furnace with state checking and delays."""
+        if source == self._active_heat_source:
+            return  # Already using this heat source
+
+        try:
+            if source == "heat_pump":
+                # Turn off furnace first
+                await self._send_command(self._hvac_entity, "set_hvac_mode", {"hvac_mode": HVACMode.OFF})
+                await asyncio.sleep(self._command_delay)
+                
+                # Turn on heat pump
+                await self._send_command(self._heat_pump_entity, "set_hvac_mode", {"hvac_mode": HVACMode.HEAT})
+                await asyncio.sleep(self._command_delay)
+                
+                # Set temperature
+                await self._send_command(
+                    self._heat_pump_entity,
+                    "set_temperature",
+                    {"temperature": self._target_temperature}
+                )
+                
+                self._active_heat_source = "heat_pump"
+                self._add_action("Activated heat pump heating")
+                
+            elif source == "furnace":
+                # Instead of turning off heat pump, set it to minimum temperature and low fan
+                await self._send_command(self._heat_pump_entity, "set_temperature", {"temperature": 17})
+                await asyncio.sleep(self._command_delay)
+                await self._send_command(self._heat_pump_entity, "set_fan_mode", {"fan_mode": "low"})
+                await asyncio.sleep(self._command_delay)
+                
+                # Turn on furnace
+                await self._send_command(self._hvac_entity, "set_hvac_mode", {"hvac_mode": HVACMode.HEAT})
+                await asyncio.sleep(self._command_delay)
+                
+                # Set temperature
+                await self._send_command(
+                    self._hvac_entity,
+                    "set_temperature",
+                    {"temperature": self._target_temperature}
+                )
+                
+                self._active_heat_source = "furnace"
+                self._add_action("Activated furnace heating with heat pump at minimum")
+                
         except Exception as e:
             self._add_action(f"Error during heat source switch: {str(e)}")
-            # Reset active source on error
-            self._active_heat_source = None
-            raise  # Re-raise the exception to ensure proper error handling
+            raise
 
     async def _determine_optimal_fan_mode(self, current_temps: dict) -> str:
         """Determine optimal fan mode based on temperature spread across sensors."""
