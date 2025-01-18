@@ -815,11 +815,12 @@ class SmartThermostat(ClimateEntity):
             if cooling_elapsed >= self._off_time:
                 self._cycle_status = "ready"
                 
-                # Adjust learning duration based on temperature difference
+                # Adjust learning duration based on temperature difference and cooling time
                 temp_diff = self._target_temperature - current_temp
-                adjustment = abs(temp_diff) * 120  # 2 minutes per degree difference
                 
                 if temp_diff > 0:  # We undershot
+                    # Standard adjustment for undershooting
+                    adjustment = abs(temp_diff) * 120  # 2 minutes per degree difference
                     new_duration = min(
                         self._learning_heating_duration + adjustment,
                         self._maximum_heating_duration
@@ -828,13 +829,24 @@ class SmartThermostat(ClimateEntity):
                         self._add_action(f"Undershot by {temp_diff:.1f}°C - Increasing duration to {new_duration/60:.1f}min (was {self._learning_heating_duration/60:.1f}min)")
                         self._learning_heating_duration = new_duration
                 elif temp_diff < 0:  # We overshot
-                    new_duration = max(
-                        self._learning_heating_duration - adjustment,
-                        self._minimum_heating_duration
-                    )
-                    if new_duration != self._learning_heating_duration:
-                        self._add_action(f"Overshot by {abs(temp_diff):.1f}°C - Decreasing duration to {new_duration/60:.1f}min (was {self._learning_heating_duration/60:.1f}min)")
-                        self._learning_heating_duration = new_duration
+                    # Calculate how much longer than _off_time we needed to wait
+                    extra_cooling_time = cooling_elapsed - self._off_time
+                    if extra_cooling_time > 0:
+                        # Adjust based on both temperature difference and extra cooling time
+                        temp_adjustment = abs(temp_diff) * 120  # Base adjustment (2 min per degree)
+                        cooling_adjustment = (extra_cooling_time / 60) * 60  # 1 min reduction per minute of extra cooling
+                        total_adjustment = max(temp_adjustment, cooling_adjustment)
+                        
+                        new_duration = max(
+                            self._learning_heating_duration - total_adjustment,
+                            self._minimum_heating_duration
+                        )
+                        if new_duration != self._learning_heating_duration:
+                            self._add_action(
+                                f"Overshot by {abs(temp_diff):.1f}°C and needed {extra_cooling_time/60:.1f}min extra cooling - "
+                                f"Decreasing duration to {new_duration/60:.1f}min (was {self._learning_heating_duration/60:.1f}min)"
+                            )
+                            self._learning_heating_duration = new_duration
                 
                 self._cooling_start_time = None  # Reset cooling start time
                 self._add_action("Off period complete - ready for next cycle")
