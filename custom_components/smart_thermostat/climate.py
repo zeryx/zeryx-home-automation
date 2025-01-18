@@ -574,9 +574,9 @@ class SmartThermostat(ClimateEntity):
         # If large temperature spread between sensors or far from target, use high
         if temp_spread > 1.5 or temp_delta > 2.0:
             return "high"
-        # If moderate spread or moderate distance from target, use medium
+        # If moderate spread or moderate distance from target, use mid
         elif temp_spread > 0.8 or temp_delta > 1.0:
-            return "medium"
+            return "mid"
         # Otherwise use low for efficiency
         else:
             return "low"
