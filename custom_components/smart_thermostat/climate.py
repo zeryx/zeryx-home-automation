@@ -408,50 +408,53 @@ class SmartThermostat(ClimateEntity):
             
         now = datetime.now(timezone.utc)
         
-        # Check forecast once per hour
-        if (self._last_forecast_check is None or 
-            (now - self._last_forecast_check).total_seconds() > 3600):
-            
-            try:
-                forecast = self._hass.states.get(self._weather_entity)
-                if not forecast:
-                    self._add_action(f"Weather entity {self._weather_entity} not found")
-                    return
-                    
-                if not forecast.attributes.get("temperature"):
-                    self._add_action(f"Temperature attribute missing from {self._weather_entity}")
-                    return
-                    
-                outdoor_temp = float(forecast.attributes.get("temperature"))
-                self._last_forecast_check = now
+        try:
+            forecast = self._hass.states.get(self._weather_entity)
+            if not forecast:
+                self._add_action(f"Weather entity {self._weather_entity} not found")
+                return
                 
-                # Determine appropriate heat source using inclusive boundaries
-                new_source = None
-                if outdoor_temp <= self._heat_pump_min_temp:
-                    new_source = "furnace"
-                elif outdoor_temp >= self._heat_pump_max_temp:
+            if not forecast.attributes.get("temperature"):
+                self._add_action(f"Temperature attribute missing from {self._weather_entity}")
+                return
+                
+            outdoor_temp = float(forecast.attributes.get("temperature"))
+            self._last_forecast_check = now
+            
+            # Determine appropriate heat source using inclusive boundaries
+            new_source = None
+            if outdoor_temp <= self._heat_pump_min_temp:
+                new_source = "furnace"
+            elif outdoor_temp >= self._heat_pump_max_temp:
+                new_source = "heat_pump"
+            else:
+                # In transition zone - make an intelligent choice based on current source
+                # If no current source, prefer heat pump as it's generally more efficient
+                if self._active_heat_source is None:
                     new_source = "heat_pump"
                 else:
-                    # In transition zone - make an intelligent choice based on current source
-                    # If no current source, prefer heat pump as it's generally more efficient
-                    if self._active_heat_source is None:
-                        new_source = "heat_pump"
-                    else:
-                        # Keep current source to prevent frequent switching
-                        new_source = self._active_heat_source
-                    
-                # Log transition zone status if applicable
-                if self._heat_pump_min_temp < outdoor_temp < self._heat_pump_max_temp:
-                    self._add_action(f"Temperature {outdoor_temp}°C is in transition zone ({self._heat_pump_min_temp}°C to {self._heat_pump_max_temp}°C) - using {new_source}")
+                    # Keep current source to prevent frequent switching
+                    new_source = self._active_heat_source
                 
-                if new_source != self._active_heat_source:
+            # Log transition zone status if applicable
+            if self._heat_pump_min_temp < outdoor_temp < self._heat_pump_max_temp:
+                self._add_action(f"Temperature {outdoor_temp}°C is in transition zone ({self._heat_pump_min_temp}°C to {self._heat_pump_max_temp}°C) - using {new_source}")
+            
+            if new_source != self._active_heat_source:
+                self._add_action(f"Heat source change needed: {self._active_heat_source} -> {new_source}")
+                # Only switch immediately if we're in the "ready" state
+                if self._cycle_status == "ready":
                     self._active_heat_source = new_source
                     await self._switch_heat_source(new_source)
-                    
-            except ValueError as e:
-                self._add_action(f"Error parsing temperature from {self._weather_entity}: {str(e)}")
-            except Exception as e:
-                self._add_action(f"Unexpected error checking outdoor temperature: {str(e)}")
+                else:
+                    # Store the pending change to be executed when current cycle completes
+                    self._pending_heat_source = new_source
+                    self._add_action(f"Heat source change queued for next cycle: {new_source}")
+                
+        except ValueError as e:
+            self._add_action(f"Error parsing temperature from {self._weather_entity}: {str(e)}")
+        except Exception as e:
+            self._add_action(f"Unexpected error checking outdoor temperature: {str(e)}")
 
     async def _get_current_state(self, entity_id):
         """Get current state of an entity."""
@@ -613,6 +616,10 @@ class SmartThermostat(ClimateEntity):
 
     async def _control_heating(self):
         """Control the heating based on temperature."""
+        # Check outdoor temperature during the cooling period
+        if self._cooling_start_time and not self._is_heating:
+            await self._check_outdoor_temperature()
+
         # Always update outdoor temperature and current temperature readings,
         # even when system is disabled
         await self._check_outdoor_temperature()
@@ -771,6 +778,15 @@ class SmartThermostat(ClimateEntity):
                     await self._start_heating_cycle(now, current_temp)
                 self.async_write_ha_state()
                 return
+
+        # When cooling period completes, check for pending heat source change
+        if hasattr(self, '_pending_heat_source') and self._pending_heat_source:
+            if self._cycle_status == "ready":
+                new_source = self._pending_heat_source
+                self._pending_heat_source = None
+                self._active_heat_source = new_source
+                await self._switch_heat_source(new_source)
+                self._add_action(f"Executing queued heat source change to {new_source}")
 
     async def _start_heating_cycle(self, now, current_temp):
         """Helper method to start a new heating cycle."""
