@@ -300,20 +300,41 @@ class SmartThermostat(ClimateEntity):
         # Update mode first
         self._hvac_mode = hvac_mode
         
-        # Turn off both systems first
-        if self._hvac_entity:
-            await self._hass.services.async_call(
-                'climate', 'set_hvac_mode',
-                {'entity_id': self._hvac_entity, 'hvac_mode': 'off'}
-            )
-        if self._heat_pump_entity:
-            await self._hass.services.async_call(
-                'climate', 'set_hvac_mode',
-                {'entity_id': self._heat_pump_entity, 'hvac_mode': 'off'}
-            )
-        
         # If turning off, update all states and return
         if hvac_mode == HVACMode.OFF:
+            # Turn off furnace
+            if self._hvac_entity:
+                await self._send_command(
+                    self._hvac_entity,
+                    'set_hvac_mode',
+                    {'hvac_mode': 'off'}
+                )
+            
+            # Set heat pump to minimum settings but don't turn off
+            if self._heat_pump_entity:
+                # Ensure heat pump is in heat mode first
+                await self._send_command(
+                    self._heat_pump_entity,
+                    'set_hvac_mode',
+                    {'hvac_mode': 'heat'}
+                )
+                await asyncio.sleep(self._command_delay)
+                
+                # Set minimum temperature
+                await self._send_command(
+                    self._heat_pump_entity,
+                    'set_temperature',
+                    {'temperature': 17}
+                )
+                await asyncio.sleep(self._command_delay)
+                
+                # Set low fan speed
+                await self._send_command(
+                    self._heat_pump_entity,
+                    'set_fan_mode',
+                    {'fan_mode': 'low'}
+                )
+            
             # Disable the smart thermostat system
             self._system_enabled = False
             self._hvac_action = HVACAction.OFF
@@ -322,6 +343,7 @@ class SmartThermostat(ClimateEntity):
             self._heating_start_time = None
             self._cooling_start_time = None
             self._cycle_status = "off"
+            self._force_mode = None  # Clear any forced mode when turning off
             self._add_action("Smart thermostat disabled - systems available for manual control")
             self.async_write_ha_state()
             return
@@ -330,32 +352,40 @@ class SmartThermostat(ClimateEntity):
         self._system_enabled = True
         
         # If turning on, determine appropriate heat source and activate it
-        await self._check_outdoor_temperature()
+        if self._force_mode:
+            self._active_heat_source = self._force_mode
+            self._add_action(f"Using forced heat source: {self._force_mode}")
+        else:
+            await self._check_outdoor_temperature()
+        
         if self._active_heat_source == "furnace":
             if self._hvac_entity:
-                await self._hass.services.async_call(
-                    'climate', 'set_hvac_mode',
-                    {'entity_id': self._hvac_entity, 'hvac_mode': 'heat'}
+                await self._send_command(
+                    self._hvac_entity,
+                    'set_hvac_mode',
+                    {'hvac_mode': 'heat'}
                 )
-                await self._hass.services.async_call(
-                    'climate', 'set_temperature',
-                    {'entity_id': self._hvac_entity, 'temperature': self._max_temp}
+                await self._send_command(
+                    self._hvac_entity,
+                    'set_temperature',
+                    {'temperature': self._max_temp}
                 )
                 self._add_action("Activated furnace heating")
         elif self._active_heat_source == "heat_pump":
             if self._heat_pump_entity:
-                # Set mode to heat
-                await self._hass.services.async_call(
-                    'climate', 'set_hvac_mode',
-                    {'entity_id': self._heat_pump_entity, 'hvac_mode': 'heat'}
+                # Ensure heat pump is in heat mode first
+                await self._send_command(
+                    self._heat_pump_entity,
+                    'set_hvac_mode',
+                    {'hvac_mode': 'heat'}
                 )
+                await asyncio.sleep(self._command_delay)
+                
                 # Set the target temperature
-                await self._hass.services.async_call(
-                    'climate', 'set_temperature',
-                    {
-                        'entity_id': self._heat_pump_entity,
-                        'temperature': self._target_temperature
-                    }
+                await self._send_command(
+                    self._heat_pump_entity,
+                    'set_temperature',
+                    {'temperature': self._target_temperature}
                 )
                 self._add_action("Activated heat pump heating")
         
