@@ -51,7 +51,7 @@ climate:
     tolerance: 0.5
     minimum_on_time: 5
     maximum_on_time: 15
-    off_time: 5
+    off_time: 20
     heat_pump_min_temp: 0
     heat_pump_max_temp: 30
 
