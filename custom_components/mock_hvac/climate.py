@@ -16,8 +16,11 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers import entity_platform
+import voluptuous as vol
+import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN
 
@@ -38,6 +41,21 @@ async def async_setup_entry(
                 furnace.unique_id, heat_pump.unique_id)
     
     async_add_entities([furnace, heat_pump], True)  # True for update before adding
+
+    # Register climate services
+    platform = entity_platform.async_get_current_platform()
+    _LOGGER.debug("Registering set_fan_mode service for mock HVAC")
+    try:
+        platform.async_register_entity_service(
+            "set_fan_mode",
+            {
+                vol.Required("fan_mode"): cv.string
+            },
+            "async_set_fan_mode"
+        )
+        _LOGGER.debug("Successfully registered set_fan_mode service")
+    except Exception as e:
+        _LOGGER.error("Failed to register set_fan_mode service: %s", str(e))
 
 class MockFurnace(ClimateEntity):
     """Mock Ecobee thermostat entity."""
@@ -89,6 +107,13 @@ class MockFurnace(ClimateEntity):
             self._attr_target_temperature = kwargs[ATTR_TEMPERATURE]
             self.async_write_ha_state()
             _LOGGER.info("Temperature set to %s", self._attr_target_temperature)
+
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
+        """Set new target fan mode."""
+        if fan_mode in self.fan_modes:
+            self._attr_fan_mode = fan_mode
+            self.async_write_ha_state()
+            _LOGGER.info("Fan mode set to %s", self._attr_fan_mode)
 
 class MockHeatPump(ClimateEntity):
     """Mock Lennox heat pump entity."""
@@ -151,4 +176,33 @@ class MockHeatPump(ClimateEntity):
         if fan_mode in self.fan_modes:
             self._attr_fan_mode = fan_mode
             self.async_write_ha_state()
-            _LOGGER.info("Fan mode set to %s", self._attr_fan_mode) 
+            _LOGGER.info("Fan mode set to %s", self._attr_fan_mode)
+
+    @property
+    def supported_features(self):
+        """Return the list of supported features."""
+        return (ClimateEntityFeature.TARGET_TEMPERATURE | 
+                ClimateEntityFeature.FAN_MODE |  # Make sure this is included
+                ClimateEntityFeature.TURN_ON |
+                ClimateEntityFeature.TURN_OFF)
+
+    @property
+    def fan_modes(self):
+        """Return the list of available fan modes."""
+        return ["low", "medium", "high", "auto"]
+
+    async def async_set_fan_mode(self, fan_mode):
+        """Set new fan mode."""
+        _LOGGER.debug("Setting fan mode to: %s for entity %s", fan_mode, self.entity_id)
+        try:
+            self._attr_fan_mode = fan_mode
+            self.async_write_ha_state()
+            _LOGGER.debug("Successfully set fan mode to %s", fan_mode)
+        except Exception as e:
+            _LOGGER.error("Failed to set fan mode: %s", str(e))
+    
+    @property
+    def fan_mode(self):
+        """Return the current fan mode."""
+        _LOGGER.debug("Getting current fan mode: %s for entity %s", self._attr_fan_mode, self.entity_id)
+        return self._attr_fan_mode 

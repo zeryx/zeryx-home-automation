@@ -5,6 +5,7 @@ from homeassistant import core
 import logging
 
 logging.getLogger("homeassistant.core").setLevel(logging.DEBUG)
+logging.getLogger("custom_components.mock_hvac.climate").setLevel(logging.DEBUG)
 
 @pytest.fixture(autouse=True)
 async def auto_enable_custom_integrations(hass):

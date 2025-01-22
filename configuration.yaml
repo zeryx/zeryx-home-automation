@@ -11,15 +11,15 @@ homeassistant:
       scan_interval: 10  # Updates every 10 seconds
 
 logger:
-  default: info
+  # default: info
   logs:
-    custom_components.smart_thermostat: debug
-    custom_components.smart_thermostat.climate: debug
+    # custom_components.smart_thermostat: debug
+    # custom_components.smart_thermostat.climate: debug
     custom_components.smartir: critical
-    homeassistant.components.climate: debug
-    homeassistant.core: info
-    custom_components.mock_hvac: debug
-    custom_components.mock_hvac.climate: debug
+    # homeassistant.components.climate: debug
+    # homeassistant.core: info
+    # custom_components.mock_hvac: debug
+    # custom_components.mock_hvac.climate: debug
   filters:
     ignore_custom_components: []
 
