@@ -5,19 +5,36 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry
 from homeassistant.const import Platform
+from datetime import timedelta
+from homeassistant.helpers.event import async_track_time_interval
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "smart_thermostat"
+SCAN_INTERVAL = timedelta(seconds=30)  # Update every 30 seconds
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Smart Thermostat integration."""
     if DOMAIN not in config:
         return True
 
+    platform = Platform.CLIMATE
     hass.async_create_task(
         hass.helpers.discovery.async_load_platform(
-            Platform.CLIMATE, DOMAIN, config[DOMAIN], config
+            platform, DOMAIN, config[DOMAIN], config
+        )
+    )
+
+    # Set up periodic updates
+    async def periodic_update(now):
+        """Update all smart thermostats."""
+        if DOMAIN in hass.data:
+            for thermostat in hass.data[DOMAIN].values():
+                await thermostat.async_update()
+
+    hass.async_create_task(
+        async_track_time_interval(
+            hass, periodic_update, SCAN_INTERVAL
         )
     )
 
