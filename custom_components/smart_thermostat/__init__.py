@@ -4,14 +4,23 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry
+from homeassistant.const import Platform
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "smart_thermostat"
 
-async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the Smart Thermostat component."""
-    
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Smart Thermostat integration."""
+    if DOMAIN not in config:
+        return True
+
+    hass.async_create_task(
+        hass.helpers.discovery.async_load_platform(
+            Platform.CLIMATE, DOMAIN, config[DOMAIN], config
+        )
+    )
+
     async def async_handle_turn_on(call: ServiceCall) -> None:
         """Handle the turn_on service call."""
         entity_id = call.data.get("entity_id")
@@ -108,4 +117,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         return True
     except Exception as e:
         _LOGGER.error("Failed to register smart_thermostat services: %s", str(e))
-        return False 
+        return False
+
+async def async_setup_entry(hass: HomeAssistant, entry: dict) -> bool:
+    """Set up Smart Thermostat from a config entry."""
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.CLIMATE])
+    return True 
