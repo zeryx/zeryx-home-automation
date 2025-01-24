@@ -1,1 +1,5 @@
 config/*
+__pyc_cache__
+__pyc_cache__/*
+*.egg-info
+tests/__pycache__
