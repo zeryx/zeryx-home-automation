@@ -233,7 +233,7 @@ async def reset_thermostat(mock_hass, mock_thermostat):
     mock_thermostat._force_mode = None
     mock_thermostat._heating_start_time = None
     mock_thermostat._cooling_start_time = None
-    mock_thermostat._cycle_status = "ready"
+    mock_thermostat._cycle_status = "waiting to activate"
     
     # Reset timing parameters to default test values
     mock_thermostat._learning_heating_duration = 0.1  # 100ms
@@ -443,7 +443,7 @@ async def test_turn_on_heat_pump_weather(mock_hass, mock_thermostat):
     
     # For heat pump, cycle_status should indicate fan speed or heating
     cycle_status = mock_thermostat._cycle_status
-    assert cycle_status in ["heating"] or cycle_status.startswith("fan speed set to "), f"Expected cycle status to be 'heating' or start with 'fan speed set to', got {cycle_status}"
+    assert cycle_status == "heatpump active"
     
     # Verify temperature control is active
     if mock_thermostat.current_temperature < mock_thermostat.target_temperature - mock_thermostat._tolerance:
@@ -453,16 +453,42 @@ async def test_turn_on_heat_pump_weather(mock_hass, mock_thermostat):
 async def test_turn_on_furnace_weather(mock_hass, mock_thermostat):
     """Test turning on the thermostat when outdoor temperature requires furnace (below 0°C)."""
     print("\n=== Starting Turn On Furnace Weather Test ===")
-    
+    current_time = datetime.now(timezone.utc)  # Use UTC timezone
+    # Set initial state to off
+    mock_thermostat._hvac_mode = HVACMode.OFF
+    mock_thermostat._system_enabled = False
+    mock_thermostat._is_heating = False
+    mock_thermostat._active_heat_source = None
+    mock_thermostat._learning_heating_duration = 5  # 5 seconds
+    mock_thermostat._minimum_heating_duration = 5
+    mock_thermostat._maximum_heating_duration = 15
+    mock_thermostat._off_time = 20
+
     # Set initial state
     mock_thermostat._hvac_mode = HVACMode.OFF
     mock_thermostat._system_enabled = False
+    
+    for sensor in mock_thermostat._temp_sensors:
+        mock_hass.states.async_set(
+            sensor, 
+            "19.0",
+            {
+                "unit_of_measurement": "°C",
+                "last_updated": current_time,  # Pass datetime object directly
+                "friendly_name": f"Temperature Sensor {sensor}"
+            }
+        )
     
     # Set outdoor temperature to require furnace
     mock_hass.states.async_set(
         "weather.forecast_home",
         "sunny",
-        {"temperature": -2.0, "temperature_unit": "°C"}
+        {
+            "temperature": -2.0,
+            "temperature_unit": "°C",
+            "last_updated": current_time,  # Pass datetime object directly
+            "friendly_name": "Weather"
+        }
     )
     await mock_hass.async_block_till_done()
     
@@ -488,171 +514,6 @@ async def test_turn_on_furnace_weather(mock_hass, mock_thermostat):
     assert mock_thermostat._system_enabled is True
     assert mock_thermostat._active_heat_source == "furnace"
     assert mock_thermostat._cycle_status.startswith("heating cycle:") and mock_thermostat._cycle_status.endswith("remaining"), f"Cycle status should be 'heating cycle: Xm remaining', got {mock_thermostat._cycle_status}"
-
-
-@pytest.mark.asyncio
-async def test_temperature_based_heat_source_switch(mock_hass, mock_thermostat):
-    """Test switching between heat sources when outdoor temperature changes."""
-    print("\n=== Starting Temperature-Based Heat Source Switch Test ===")
-    
-    mock_thermostat._hvac_mode = HVACMode.OFF
-    mock_thermostat._system_enabled = False
-    
-    # Set temperature to ensure heating is needed
-    for sensor in mock_thermostat._temp_sensors:
-        mock_hass.states.async_set(sensor, "19.0", {"unit_of_measurement": "°C"})
-    
-    # Set outdoor temperature to favor heat pump
-    mock_hass.states.async_set(
-        "weather.forecast_home",
-        "sunny",
-        {"temperature": 5.0, "temperature_unit": "°C"}
-    )
-    await mock_hass.async_block_till_done()
-    
-    # Turn system on using service call
-    await mock_thermostat.async_turn_on()
-    await mock_hass.async_block_till_done()
-    
-    # Force a control cycle to ensure heat pump is active
-    await mock_thermostat._control_heating()
-    await mock_hass.async_block_till_done()
-    
-    print("\nAfter HEAT service call:")
-    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
-    print(f"- system_enabled: {mock_thermostat._system_enabled}")
-    print(f"- active_heat_source: {getattr(mock_thermostat, '_active_heat_source', None)}")
-    print(f"- cycle_status: {mock_thermostat._cycle_status}")
-    print(f"- is_heating: {mock_thermostat._is_heating}")
-    print(f"- target_temperature: {mock_thermostat.target_temperature}")
-    
-    # Verify initial state with heat pump
-    assert mock_thermostat.hvac_mode == HVACMode.HEAT
-    assert mock_thermostat._system_enabled is True
-    assert mock_thermostat._active_heat_source == "heat_pump"
-    
-    # Change outdoor temperature to require furnace
-    print("\nChanging outdoor temperature to -1.0°C...")
-    mock_hass.states.async_set(
-        "weather.forecast_home",
-        "sunny",
-        {"temperature": -1.0, "temperature_unit": "°C"}
-    )
-    await mock_hass.async_block_till_done()
-    
-    # Force a control cycle to handle the temperature change
-    print("\nBefore control heating:")
-    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
-    print(f"- target_temperature: {mock_thermostat.target_temperature}")
-    
-    # Force switch to furnace
-    await mock_thermostat._switch_heat_source("furnace")
-    await mock_hass.async_block_till_done()
-    
-    print("\nAfter temperature change and control cycle:")
-    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
-    print(f"- system_enabled: {mock_thermostat._system_enabled}")
-    print(f"- active_heat_source: {getattr(mock_thermostat, '_active_heat_source', None)}")
-    print(f"- outdoor temp: {mock_hass.states.get('weather.forecast_home').attributes['temperature']}°C")
-    print(f"- cycle_status: {mock_thermostat._cycle_status}")
-    print(f"- is_heating: {mock_thermostat._is_heating}")
-    print(f"- target_temperature: {mock_thermostat.target_temperature}")
-    print(f"- heat_pump_last_mode: {getattr(mock_thermostat, '_heat_pump_last_mode', None)}")
-    print(f"- heat_pump_last_temp: {getattr(mock_thermostat, '_heat_pump_last_temp', None)}")
-    print(f"- heat_pump_last_fan: {getattr(mock_thermostat, '_heat_pump_last_fan', None)}")
-    print(f"- furnace_last_mode: {getattr(mock_thermostat, '_furnace_last_mode', None)}")
-    print(f"- furnace_last_temp: {getattr(mock_thermostat, '_furnace_last_temp', None)}")
-    
-    # Verify heat source switched to furnace
-    assert mock_thermostat._active_heat_source == "furnace", "Heat source should switch to furnace when temperature drops below 0°C"
-    assert mock_thermostat.hvac_mode == HVACMode.HEAT, "HVAC mode should remain HEAT after source switch"
-    assert mock_thermostat._system_enabled is True, "System should remain enabled after source switch"
-    assert mock_thermostat._heat_pump_last_temp == 17, "Heat pump should be set to minimum temperature"
-    
-    # Verify heat pump is set to minimum settings
-    assert mock_thermostat._heat_pump_last_temp == 17, "Heat pump should be set to minimum temperature"
-    assert mock_thermostat._heat_pump_last_fan == "low", "Heat pump fan should be set to low"
-    
-    # Verify furnace is properly configured
-    assert mock_thermostat._furnace_last_mode == "heat", "Furnace should be set to heat mode"
-    assert mock_thermostat._furnace_last_temp == mock_thermostat._max_temp, "Furnace should be set to max temperature"
-
-@pytest.mark.asyncio
-async def test_turn_on_off_widget(mock_hass, mock_thermostat):
-    """Test the turn on/off widget functionality."""
-    print("\n=== Starting Turn On/Off Widget Test ===")
-    
-    # Set initial state to off
-    mock_thermostat._hvac_mode = HVACMode.OFF
-    mock_thermostat._system_enabled = False
-    mock_thermostat._is_heating = False
-    mock_thermostat._active_heat_source = None
-    mock_thermostat._learning_heating_duration = 0.1  # Set initial learning duration to 0.1s
-    mock_thermostat._minimum_heating_duration = 0.1  # Set minimum duration to 0.1s
-    mock_thermostat._maximum_heating_duration = 0.2  # Set maximum duration to 0.2s
-    mock_thermostat._off_time = 0.1  # Set cooling period to 0.1s
-    
-    print("\nInitial state:")
-    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
-    print(f"- system_enabled: {mock_thermostat._system_enabled}")
-    print(f"- is_heating: {mock_thermostat._is_heating}")
-    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
-    
-    # Set temperature to ensure heating is needed
-    for sensor in mock_thermostat._temp_sensors:
-        mock_hass.states.async_set(sensor, "19.0", {"unit_of_measurement": "°C"})
-    
-    # Turn system on using service call
-    print("\nTurning system ON...")
-    await mock_thermostat.async_turn_on()
-    await mock_hass.async_block_till_done()
-    
-    # Force a control cycle to start heating
-    await mock_thermostat._control_heating()
-    await mock_hass.async_block_till_done()
-    
-    print("\nAfter turn ON and control cycle:")
-    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
-    print(f"- system_enabled: {mock_thermostat._system_enabled}")
-    print(f"- is_heating: {mock_thermostat._is_heating}")
-    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
-    print(f"- cycle_status: {mock_thermostat._cycle_status}")
-    
-    # Verify system is on and heating
-    assert mock_thermostat.hvac_mode == HVACMode.HEAT, "HVAC mode should be HEAT"
-    assert mock_thermostat._system_enabled is True, "System should be enabled"
-    assert mock_thermostat._is_heating is True, "System should be heating"
-    assert mock_thermostat._active_heat_source in ["heat_pump", "furnace"], "An active heat source should be selected"
-    assert mock_thermostat._cycle_status in ["heating", "fan speed set to low", "fan speed set to mid", "fan speed set to high"], "Cycle status should indicate active heating"
-    
-    # Turn system off
-    print("\nTurning system OFF...")
-    await mock_thermostat.async_turn_off()
-    await mock_hass.async_block_till_done()
-    
-    print("\nAfter turn OFF:")
-    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
-    print(f"- system_enabled: {mock_thermostat._system_enabled}")
-    print(f"- is_heating: {mock_thermostat._is_heating}")
-    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
-    print(f"- cycle_status: {mock_thermostat._cycle_status}")
-    
-    # Verify system is fully off
-    assert mock_thermostat.hvac_mode == HVACMode.OFF, "HVAC mode should be OFF"
-    assert mock_thermostat._system_enabled is False, "System should be disabled"
-    assert mock_thermostat._is_heating is False, "System should not be heating"
-    assert mock_thermostat._active_heat_source is None, "No heat source should be active"
-    assert mock_thermostat._cycle_status == "off", "Cycle status should be off"
-    
-    # Wait a bit to ensure no further HVAC interactions
-    await asyncio.sleep(0.1)  # Change to 100ms
-    
-    # Verify system remains off and inactive
-    assert mock_thermostat.hvac_mode == HVACMode.OFF, "HVAC mode should remain OFF"
-    assert mock_thermostat._system_enabled is False, "System should remain disabled"
-    assert mock_thermostat._is_heating is False, "System should remain not heating"
-    assert mock_thermostat._active_heat_source is None, "No heat source should remain active"
-    assert mock_thermostat._cycle_status == "off", "Cycle status should remain off"
 
 @pytest.mark.asyncio
 async def test_furnace_heating_cycle(mock_hass, mock_thermostat):
@@ -750,4 +611,351 @@ async def test_furnace_heating_cycle(mock_hass, mock_thermostat):
         assert mock_thermostat._is_heating is False, "Heating should be stopped"
         assert mock_thermostat._cycle_status.startswith("cooling cycle:"), \
             f"Cycle status should start with 'cooling cycle:', got {mock_thermostat._cycle_status}"
-        assert mock_thermostat._cooling_start_time is not None, "Cooling start time should be set" 
+        assert mock_thermostat._cooling_start_time is not None, "Cooling start time should be set"
+
+@pytest.mark.asyncio
+async def test_turn_on_off_widget(mock_hass, mock_thermostat):
+    """Test the turn on/off widget functionality."""
+    print("\n=== Starting Turn On/Off Widget Test ===")
+    
+    # Set initial state to off
+    mock_thermostat._hvac_mode = HVACMode.OFF
+    mock_thermostat._system_enabled = False
+    mock_thermostat._is_heating = False
+    mock_thermostat._active_heat_source = None
+    mock_thermostat._learning_heating_duration = 5  # 5 seconds
+    mock_thermostat._minimum_heating_duration = 5
+    mock_thermostat._maximum_heating_duration = 15
+    mock_thermostat._off_time = 20
+    
+    current_time = datetime.now(timezone.utc)  # Use UTC timezone
+
+    for sensor in mock_thermostat._temp_sensors:
+        mock_hass.states.async_set(
+            sensor, 
+            "19.0",
+            {
+                "unit_of_measurement": "°C",
+                "last_updated": current_time,  # Pass datetime object directly
+                "friendly_name": f"Temperature Sensor {sensor}"
+            }
+        )
+    
+    # Set outdoor temperature to require furnace
+    print("\nSetting outdoor temperature to -2.0°C (furnace required)...")
+    mock_hass.states.async_set(
+        "weather.forecast_home",
+        "sunny",
+        {
+            "temperature": -2.0,
+            "temperature_unit": "°C",
+            "last_updated": current_time,  # Pass datetime object directly
+            "friendly_name": "Weather"
+        }
+    )
+        # Mock datetime for the entire test
+    with patch('custom_components.smart_thermostat.climate.datetime') as mock_datetime, \
+         patch('homeassistant.util.dt.now') as mock_dt_now:  # Mock HA's dt.now instead
+        
+        # Configure datetime mocks to return timezone-aware datetime
+        mock_datetime.now.return_value = current_time
+        mock_dt_now.return_value = current_time
+
+    await mock_hass.async_block_till_done()
+    
+    print("\nInitial state:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- is_heating: {mock_thermostat._is_heating}")
+    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
+    
+    # Turn system on using service call
+    print("\nTurning system ON...")
+    await mock_thermostat.async_turn_on()
+    await mock_hass.async_block_till_done()
+    
+    print("\nAfter turn ON and control cycle:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- is_heating: {mock_thermostat._is_heating}")
+    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
+    print(f"- cycle_status: {mock_thermostat._cycle_status}")
+    
+    # Verify system is on and heating
+    assert mock_thermostat.hvac_mode == HVACMode.HEAT, "HVAC mode should be HEAT"
+    assert mock_thermostat._system_enabled is True, "System should be enabled"
+    assert mock_thermostat._is_heating is True, "System should be heating"
+    assert mock_thermostat._active_heat_source in ["heat_pump", "furnace"], "An active heat source should be selected"
+    assert mock_thermostat._cycle_status.startswith("heating cycle:"), "Cycle status should be heating cycle"
+    
+
+    new_time = current_time + timedelta(seconds=6)  # Past the 5s heating duration
+    mock_datetime.now.return_value = new_time
+    mock_dt_now.return_value = new_time
+
+    # Turn system off
+    print("\nTurning system OFF...")
+    await mock_thermostat.async_turn_off()
+    await mock_hass.async_block_till_done()
+    
+    print("\nAfter turn OFF:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- is_heating: {mock_thermostat._is_heating}")
+    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
+    print(f"- cycle_status: {mock_thermostat._cycle_status}")
+    
+    # Verify system is fully off
+    assert mock_thermostat.hvac_mode == HVACMode.OFF, "HVAC mode should be OFF"
+    assert mock_thermostat._system_enabled is False, "System should be disabled"
+    assert mock_thermostat._is_heating is False, "System should not be heating"
+    assert mock_thermostat._active_heat_source is None, "No heat source should be active"
+    assert mock_thermostat._cycle_status == "off", "Cycle status should be off"
+    
+    # Wait a bit to ensure no further HVAC interactions
+    await asyncio.sleep(0.1)  # Change to 100ms
+    
+    # Verify system remains off and inactive
+    assert mock_thermostat.hvac_mode == HVACMode.OFF, "HVAC mode should remain OFF"
+    assert mock_thermostat._system_enabled is False, "System should remain disabled"
+    assert mock_thermostat._is_heating is False, "System should remain not heating"
+    assert mock_thermostat._active_heat_source is None, "No heat source should remain active"
+    assert mock_thermostat._cycle_status == "off", "Cycle status should remain off"
+
+@pytest.mark.asyncio
+async def test_temperature_based_heat_source_switch(mock_hass, mock_thermostat):
+    """Test switching between heat sources when outdoor temperature changes."""
+    print("\n=== Starting Temperature-Based Heat Source Switch Test ===")
+
+
+    mock_thermostat._hvac_mode = HVACMode.OFF
+    mock_thermostat._system_enabled = False
+    mock_thermostat._is_heating = False
+    mock_thermostat._active_heat_source = None
+    mock_thermostat._learning_heating_duration = 5  # 5 seconds
+    mock_thermostat._minimum_heating_duration = 5
+    mock_thermostat._maximum_heating_duration = 15
+    mock_thermostat._off_time = 20
+    
+    
+    current_time = datetime.now(timezone.utc)  # Use UTC timezone
+
+            # Mock datetime for the entire test
+    with patch('custom_components.smart_thermostat.climate.datetime') as mock_datetime, \
+         patch('homeassistant.util.dt.now') as mock_dt_now:  # Mock HA's dt.now instead
+        
+        # Configure datetime mocks to return timezone-aware datetime
+        mock_datetime.now.return_value = current_time
+        mock_dt_now.return_value = current_time
+    
+    
+    print("\nSetting temperature sensors below setpoint (19.0°C)...")
+    for sensor in mock_thermostat._temp_sensors:
+        mock_hass.states.async_set(
+            sensor, 
+            "19.0",
+            {
+                "unit_of_measurement": "°C",
+                "last_updated": current_time,  # Pass datetime object directly
+                "friendly_name": f"Temperature Sensor {sensor}"
+            }
+        )
+    
+    # Set outdoor temperature to require heat pump
+    print("\nSetting outdoor temperature to 2.0°C (heat pump required)...")
+    mock_hass.states.async_set(
+        "weather.forecast_home",
+        "sunny",
+        {
+            "temperature": 2.0,
+            "temperature_unit": "°C",
+            "last_updated": current_time,  # Pass datetime object directly
+            "friendly_name": "Weather"
+        }
+    )
+    await mock_hass.async_block_till_done()
+    
+    # Turn system on using service call
+    await mock_thermostat.async_turn_on()
+    
+    # Force a control cycle to ensure heat pump is active
+    await mock_thermostat._control_heating()
+    await mock_hass.async_block_till_done()
+    
+    print("\nAfter HEAT service call:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- active_heat_source: {getattr(mock_thermostat, '_active_heat_source', None)}")
+    print(f"- cycle_status: {mock_thermostat._cycle_status}")
+    print(f"- is_heating: {mock_thermostat._is_heating}")
+    print(f"- target_temperature: {mock_thermostat.target_temperature}")
+    
+    # Verify initial state with heat pump
+    assert mock_thermostat.hvac_mode == HVACMode.HEAT
+    assert mock_thermostat._system_enabled is True
+    assert mock_thermostat._active_heat_source == "heat_pump"
+    assert mock_thermostat._cycle_status == "heatpump active"
+    # Change outdoor temperature to require furnace
+    print("\nChanging outdoor temperature to -1.0°C...")
+    mock_hass.states.async_set(
+        "weather.forecast_home",
+        "sunny",
+        {"temperature": -1.0, "temperature_unit": "°C"}
+    )
+
+    new_time = current_time + timedelta(seconds=6)  # Past the 5s heating duration
+    mock_datetime.now.return_value = new_time
+    mock_dt_now.return_value = new_time
+
+    await mock_hass.async_block_till_done()
+    
+    # Force a control cycle to handle the temperature change
+    print("\nBefore control heating:")
+    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
+    print(f"- target_temperature: {mock_thermostat.target_temperature}")
+    
+    # Force switch to furnace
+    await mock_thermostat._switch_heat_source("furnace")
+    await mock_thermostat._control_heating()
+    await mock_hass.async_block_till_done()
+    
+    print("\nAfter temperature change and control cycle:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- active_heat_source: {getattr(mock_thermostat, '_active_heat_source', None)}")
+    print(f"- outdoor temp: {mock_hass.states.get('weather.forecast_home').attributes['temperature']}°C")
+    print(f"- cycle_status: {mock_thermostat._cycle_status}")
+    print(f"- is_heating: {mock_thermostat._is_heating}")
+    print(f"- target_temperature: {mock_thermostat.target_temperature}")
+    print(f"- heat_pump_last_mode: {getattr(mock_thermostat, '_heat_pump_last_mode', None)}")
+    print(f"- heat_pump_last_temp: {getattr(mock_thermostat, '_heat_pump_last_temp', None)}")
+    print(f"- heat_pump_last_fan: {getattr(mock_thermostat, '_heat_pump_last_fan', None)}")
+    print(f"- furnace_last_mode: {getattr(mock_thermostat, '_furnace_last_mode', None)}")
+    print(f"- furnace_last_temp: {getattr(mock_thermostat, '_furnace_last_temp', None)}")
+    
+    # Verify heat source switched to furnace
+    assert mock_thermostat._active_heat_source == "furnace", "Heat source should switch to furnace when temperature drops below 0°C"
+    assert mock_thermostat.hvac_mode == HVACMode.HEAT, "HVAC mode should remain HEAT after source switch"
+    assert mock_thermostat._system_enabled is True, "System should remain enabled after source switch"
+    assert mock_thermostat._heat_pump_last_temp == 17, "Heat pump should be set to minimum temperature"
+    assert mock_thermostat._cycle_status.startswith("heating cycle:"), "Cycle status should be heating cycle"
+    
+    # Verify heat pump is set to minimum settings
+    assert mock_thermostat._heat_pump_last_temp == 17, "Heat pump should be set to minimum temperature"
+    assert mock_thermostat._heat_pump_last_fan == "low", "Heat pump fan should be set to low"
+    
+    # Verify furnace is properly configured
+    assert mock_thermostat._furnace_last_mode == "heat", "Furnace should be set to heat mode"
+    assert mock_thermostat._furnace_last_temp == mock_thermostat._max_temp, "Furnace should be set to max temperature"
+
+@pytest.mark.asyncio
+async def test_turn_on_above_setpoint(mock_hass, mock_thermostat):
+    """Test turning on when temperature is above setpoint."""
+    print("\n=== Starting Turn On Above Setpoint Test ===")
+
+        # Set initial state to off
+    mock_thermostat._hvac_mode = HVACMode.OFF
+    mock_thermostat._system_enabled = False
+    mock_thermostat._is_heating = False
+    mock_thermostat._active_heat_source = None
+    mock_thermostat._learning_heating_duration = 5  # 5 seconds
+    mock_thermostat._minimum_heating_duration = 5
+    mock_thermostat._maximum_heating_duration = 15
+    mock_thermostat._off_time = 20
+    
+    
+    current_time = datetime.now(timezone.utc)  # Use UTC timezone
+
+            # Mock datetime for the entire test
+    with patch('custom_components.smart_thermostat.climate.datetime') as mock_datetime, \
+         patch('homeassistant.util.dt.now') as mock_dt_now:  # Mock HA's dt.now instead
+        
+        # Configure datetime mocks to return timezone-aware datetime
+        mock_datetime.now.return_value = current_time
+        mock_dt_now.return_value = current_time
+    
+    print("\nInitial state:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- target_temperature: {mock_thermostat.target_temperature}")
+    
+    # Set temperature sensors above setpoint
+    print("\nSetting temperature sensors above setpoint (23.0°C)...")
+    for sensor in mock_thermostat._temp_sensors:
+        mock_hass.states.async_set(
+            sensor, 
+            "23.0",
+            {
+                "unit_of_measurement": "°C",
+                "last_updated": current_time,  # Pass datetime object directly
+                "friendly_name": f"Temperature Sensor {sensor}"
+            }
+        )
+    
+    # Set outdoor temperature to require furnace
+    print("\nSetting outdoor temperature to -2.0°C (furnace required)...")
+    mock_hass.states.async_set(
+        "weather.forecast_home",
+        "sunny",
+        {
+            "temperature": -2.0,
+            "temperature_unit": "°C",
+            "last_updated": current_time,  # Pass datetime object directly
+            "friendly_name": "Weather"
+        }
+    )
+    
+    print("\nTurning system ON...")
+    await mock_thermostat.async_turn_on()
+    await mock_hass.async_block_till_done()
+    
+    print("\nAfter turn ON with temperature above setpoint:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- is_heating: {mock_thermostat._is_heating}")
+    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
+    print(f"- cycle_status: {mock_thermostat._cycle_status}")
+    print(f"- current_temperature: {mock_thermostat.current_temperature}")
+    print(f"- target_temperature: {mock_thermostat.target_temperature}")
+    
+    assert mock_thermostat.hvac_mode == HVACMode.HEAT
+    assert mock_thermostat._system_enabled is True
+    assert mock_thermostat._is_heating is False
+    assert mock_thermostat._cycle_status == "waiting to activate"
+    
+    # Now lower temperature and verify heating starts
+    print("\nLowering temperature to 19.0°C (below setpoint)...")
+    for sensor in mock_thermostat._temp_sensors:
+        mock_hass.states.async_set(
+            sensor, 
+            "19",
+            {
+                "unit_of_measurement": "°C",
+                "last_updated": current_time+timedelta(seconds=1),  # Pass datetime object directly
+                "friendly_name": f"Temperature Sensor {sensor}"
+            }
+        )
+
+    new_time = current_time + timedelta(seconds=6)  # Past the 5s heating duration
+    mock_datetime.now.return_value = new_time
+    mock_dt_now.return_value = new_time
+
+    await mock_hass.async_block_till_done()
+    
+    # Force a control cycle to ensure heating starts
+    await mock_thermostat._control_heating()
+    await mock_hass.async_block_till_done()
+    
+    print("\nAfter temperature drop and control cycle:")
+    print(f"- hvac_mode: {mock_thermostat.hvac_mode}")
+    print(f"- system_enabled: {mock_thermostat._system_enabled}")
+    print(f"- is_heating: {mock_thermostat._is_heating}")
+    print(f"- active_heat_source: {mock_thermostat._active_heat_source}")
+    print(f"- cycle_status: {mock_thermostat._cycle_status}")
+    print(f"- current_temperature: {mock_thermostat.current_temperature}")
+    print(f"- target_temperature: {mock_thermostat.target_temperature}")
+    print(f"- heating_start_time: {mock_thermostat._heating_start_time}")
+    print(f"- learning_duration: {mock_thermostat._learning_heating_duration/60:.1f}min")
+    
+    assert mock_thermostat._is_heating is True
+    assert mock_thermostat._cycle_status.startswith("heating cycle:")

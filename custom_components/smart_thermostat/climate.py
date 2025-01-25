@@ -118,7 +118,7 @@ class SmartThermostat(ClimateEntity):
         self._minimum_heating_duration = minimum_on_time
         self._maximum_heating_duration = maximum_on_time
         self._off_time = off_time
-        self._cycle_status = "ready"
+        self._cycle_status = "waiting to activate"
         self._time_remaining = 0
         self._outdoor_temp_furnace_threshold = heat_pump_min_temp
         self._outdoor_temp_heat_pump_threshold = heat_pump_max_temp
@@ -419,7 +419,10 @@ class SmartThermostat(ClimateEntity):
     async def async_turn_on(self) -> None:
         """Turn the entity on."""
         self._system_enabled = True
-        await self.async_set_hvac_mode(HVACMode.HEAT)
+        # await self.async_set_hvac_mode(HVACMode.HEAT)
+        self._hvac_mode = HVACMode.HEAT
+        await self._check_outdoor_temperature()
+        await self._control_heating()
 
     async def async_turn_off(self) -> None:
         """Turn the entity off."""
@@ -591,7 +594,15 @@ class SmartThermostat(ClimateEntity):
                 try:
                     self._add_action("Setting heat pump to minimum settings")
                     
-                    # First set minimum temperature
+                    # First set mode
+                    await self._send_command(
+                        self._heat_pump_entity,
+                        'set_hvac_mode',
+                        {'hvac_mode': 'heat'}
+                    )
+                    await asyncio.sleep(self._command_delay)
+
+                    # Then set temperature
                     await self._send_command(
                         self._heat_pump_entity,
                         'set_temperature',
@@ -605,46 +616,21 @@ class SmartThermostat(ClimateEntity):
                     await self._send_command(
                         self._heat_pump_entity,
                         'set_fan_mode',
-                        {'fan_mode': 'low'}
+                        {'fan_mode': 'auto'}
                     )
-                    self._heat_pump_last_fan = 'low'  # Explicitly set last fan mode
-                    self._add_action(f"Heat pump fan set to low (last_fan: {self._heat_pump_last_fan})")
+                    self._heat_pump_last_fan = 'auto'  # Explicitly set last fan mode
+                    self._add_action(f"Heat pump fan set to auto (last_fan: {self._heat_pump_last_fan})")
                     await asyncio.sleep(self._command_delay)
 
-                    # Finally turn it off
-                    await self._send_command(
-                        self._heat_pump_entity,
-                        'set_hvac_mode',
-                        {'hvac_mode': HVACMode.OFF}
-                    )
-                    self._heat_pump_last_mode = HVACMode.OFF  # Explicitly set last mode
-                    self._add_action(f"Heat pump turned off (last_mode: {self._heat_pump_last_mode})")
-                    await asyncio.sleep(self._command_delay)
+                    if self._force_mode:
+                        self._cycle_status = "forced"
                     
                 except Exception as e:
                     self._add_action(f"Warning: Failed to set heat pump minimum settings: {str(e)}")
 
                 # Turn on furnace
-                self._add_action("Activating furnace")
-                await self._send_command(self._hvac_entity, "set_hvac_mode", {"hvac_mode": HVACMode.HEAT})
-                self._furnace_last_mode = HVACMode.HEAT  # Explicitly set last mode
-                await asyncio.sleep(self._command_delay)
-                
-                # Set temperature
-                await self._send_command(
-                    self._hvac_entity,
-                    "set_temperature",
-                    {"temperature": self._max_temp}
-                )
-                self._furnace_last_temp = self._max_temp  # Explicitly set last temp
                 
                 self._active_heat_source = "furnace"
-                # Set cycle status based on force mode
-                if self._force_mode:
-                    self._cycle_status = "forced"
-                else:
-                    self._cycle_status = "ready"
-                self._add_action(f"Heat source switch complete - now using furnace (last_furnace_temp: {self._furnace_last_temp})")
 
             elif source == "heat_pump":
                 self._add_action("Starting switch to heat pump")
@@ -656,22 +642,10 @@ class SmartThermostat(ClimateEntity):
                 # Turn on heat pump
                 await self._send_command(self._heat_pump_entity, "set_hvac_mode", {"hvac_mode": HVACMode.HEAT})
                 self._heat_pump_last_mode = HVACMode.HEAT  # Explicitly set last mode
-                await asyncio.sleep(self._command_delay)
-                
-                # Set temperature
-                await self._send_command(
-                    self._heat_pump_entity,
-                    "set_temperature",
-                    {"temperature": self._target_temperature}
-                )
-                self._heat_pump_last_temp = self._target_temperature  # Explicitly set last temp
-                
                 self._active_heat_source = "heat_pump"
                 # Set cycle status based on force mode
                 if self._force_mode:
                     self._cycle_status = "forced"
-                else:
-                    self._cycle_status = "ready"
                 self._add_action(f"Heat source switch complete - now using heat pump (last_heat_pump_temp: {self._heat_pump_last_temp})")
 
         except Exception as e:
@@ -703,9 +677,7 @@ class SmartThermostat(ClimateEntity):
 
     async def _control_heating(self):
         """Control the heating based on temperature."""
-        # Always update outdoor temperature and current temperature readings,
-        # even when system is disabled
-        # await self._check_outdoor_temperature()
+        # Always update current temperature readings, even when system is disabled
         current_temp = self.current_temperature
 
         # If system is disabled, ensure all heating systems are off and states are reset
@@ -734,58 +706,49 @@ class SmartThermostat(ClimateEntity):
                 self._add_action("System disabled - heating systems turned off")
                 self.async_write_ha_state()
             return
-            
-        # Heat pump control logic - let it manage its own temperature
+
+        # Dispatch to appropriate control method based on active heat source
         if self._active_heat_source == "heat_pump":
-            # Only manage fan speed and basic state tracking
-            now = datetime.now()
-            
-            # Set heating state based on temperature conditions
-            if self._hvac_mode == HVACMode.HEAT:
-                if current_temp is not None:
-                    self._is_heating = True
-                    self._hvac_action = HVACAction.HEATING
-                    # Set initial cycle status if not already set to fan speed
-                    if not self._cycle_status.startswith("fan speed set to"):
-                        self._cycle_status = "heating"
-            
-            # Check if it's time to adjust fan mode (using off_time as check interval)
-            should_check_fan = (
-                not hasattr(self, '_last_fan_check') or 
-                (now - getattr(self, '_last_fan_check')).total_seconds() >= self._off_time
-            )
-            
-            if should_check_fan and self._hvac_mode == HVACMode.HEAT:
-                self._last_fan_check = now
-                optimal_fan_mode = await self._determine_optimal_fan_mode(self._sensor_temperatures)
-                
-                try:
-                    await self._send_command(
-                        self._heat_pump_entity,
-                        'set_fan_mode',
-                        {'fan_mode': optimal_fan_mode}
-                    )
-                    self._cycle_status = f"fan speed set to {optimal_fan_mode}"
-                    self._add_action(f"Set heat pump fan mode to {optimal_fan_mode}")
-                except Exception as e:
-                    self._add_action(f"Failed to set fan mode: {str(e)}")
-            
-            # Skip furnace control logic when heat pump is active
-            return
-            
-        # # Furnace control logic with heating cycles
-        # _LOGGER.debug(
-        #     "Control Heating Check - Name: %s, Current Temp: %.1f, Target: %.1f, "
-        #     "Is Heating: %s, Cycle Status: %s, Learning Duration: %.1f min",
-        #     self._name,
-        #     self.current_temperature if self.current_temperature is not None else -999,
-        #     self._target_temperature,
-        #     self._is_heating,
-        #     self._cycle_status,
-        #     self._learning_heating_duration / 60
-        # )
+            await self._control_heating_heat_pump(current_temp)
+        elif self._active_heat_source == "furnace":
+            await self._control_heating_furnace(current_temp)
+        else:
+            self._add_action("No active heat source selected")
+
+    async def _control_heating_heat_pump(self, current_temp: float):
+        """Control heat pump specific heating logic."""
+        # Only manage fan speed and basic state tracking
+        now = datetime.now()
         
-        if not self._hvac_entity or self._hvac_mode == HVACMode.OFF:
+        # Set heating state based on temperature conditions
+        if self._hvac_mode == HVACMode.HEAT:
+            if current_temp is not None:
+                self._is_heating = True
+                self._hvac_action = HVACAction.HEATING
+        
+        # Check if it's time to adjust fan mode (using off_time as check interval)
+        should_check_fan = (
+            not hasattr(self, '_last_fan_check') or 
+            (now - getattr(self, '_last_fan_check')).total_seconds() >= self._off_time
+        )
+        
+        if should_check_fan and self._hvac_mode == HVACMode.HEAT:
+            self._last_fan_check = now
+            optimal_fan_mode = await self._determine_optimal_fan_mode(self._sensor_temperatures)
+            self._cycle_status = "heatpump active"
+            try:
+                await self._send_command(
+                    self._heat_pump_entity,
+                    'set_fan_mode',
+                    {'fan_mode': optimal_fan_mode}
+                )
+                self._add_action(f"Set heat pump fan mode to {optimal_fan_mode}")
+            except Exception as e:
+                self._add_action(f"Failed to set fan mode: {str(e)}")
+
+    async def _control_heating_furnace(self, current_temp: float):
+        """Control furnace specific heating logic with cycles."""
+        if not self._system_enabled or self._hvac_mode == HVACMode.OFF:
             self._cycle_status = "off"
             self._is_heating = False
             self._hvac_action = HVACAction.OFF
@@ -793,16 +756,12 @@ class SmartThermostat(ClimateEntity):
             self.async_write_ha_state()
             return
 
-        if current_temp is None:
-            self._cycle_status = "error"
-            self._add_action("No temperature reading available")
-            return
 
         now = datetime.now()
         
         # If we're not in any cycle and not cooling, ensure we're in ready state
         if not self._is_heating and not self._cooling_start_time:
-            self._cycle_status = "ready"
+            self._cycle_status = "waiting to activate"
             self._add_action(f"Status: ready, Temp: {current_temp:.1f}°C, Target: {self._target_temperature}°C, Heating: {self._is_heating}")
             
         # Start new heating cycle if needed and not in cooling period
@@ -845,7 +804,7 @@ class SmartThermostat(ClimateEntity):
             self._add_action(f"Off period: {cooling_elapsed:.1f}s of {self._off_time}s ({cooling_elapsed/60:.1f}min of {self._off_time/60:.1f}min)")
             
             if cooling_elapsed >= self._off_time:
-                self._cycle_status = "ready"
+                self._cycle_status = "waiting to activate"
                 
                 # Adjust learning duration based on temperature difference and cooling time
                 temp_diff = self._target_temperature - current_temp
@@ -892,7 +851,7 @@ class SmartThermostat(ClimateEntity):
 
         # When cooling period completes, check for pending heat source change
         if hasattr(self, '_pending_heat_source') and self._pending_heat_source:
-            if self._cycle_status == "ready":
+            if self._cycle_status == "waiting to activate":
                 new_source = self._pending_heat_source
                 self._pending_heat_source = None
                 self._active_heat_source = new_source
@@ -948,9 +907,6 @@ class SmartThermostat(ClimateEntity):
             if self._system_enabled:
                 self._add_action("System enabled, switching heat source")
                 await self._switch_heat_source(source)
-                # Ensure state is written after switch
-                self.async_write_ha_state()
-                await self._hass.async_block_till_done()
             else:
                 self._add_action("System disabled, heat source switch queued")
         else:
