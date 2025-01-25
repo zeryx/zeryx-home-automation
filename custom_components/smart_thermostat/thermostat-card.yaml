@@ -72,14 +72,33 @@ cards:
           {% endif %}
         icon: mdi:thermometer-lines
 
-  - type: custom:mushroom-climate-card
+  - type: custom:mushroom-template-card
     entity: climate.smart_furnace
     fill_container: true
-    show_temperature_control: false
-    hvac_modes:
-      - "off"
-      - "heat"
-    
+    primary: System Power
+    secondary: >
+      {% if is_state('climate.smart_furnace', 'off') %}
+        Off
+      {% else %}
+        On
+      {% endif %}
+    icon: >
+      {% if is_state('climate.smart_furnace', 'off') %}
+        mdi:power-off
+      {% else %}
+        mdi:power
+      {% endif %}
+    tap_action:
+      action: call-service
+      service: climate.turn_on
+      target:
+        entity_id: climate.smart_furnace
+    double_tap_action:
+      action: call-service
+      service: climate.turn_off
+      target:
+        entity_id: climate.smart_furnace
+
   - type: horizontal-stack
     cards:
       - type: custom:mushroom-template-card
