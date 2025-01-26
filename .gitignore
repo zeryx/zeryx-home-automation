@@ -3,3 +3,4 @@ __pyc_cache__
 __pyc_cache__/*
 *.egg-info
 tests/__pycache__
+custom_components/smart_thermostat/__pycache__

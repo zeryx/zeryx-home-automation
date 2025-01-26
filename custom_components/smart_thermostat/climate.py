@@ -96,9 +96,7 @@ class SmartThermostat(ClimateEntity):
         
         # Add supported features
         self._attr_supported_features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE |
-            ClimateEntityFeature.TURN_ON |
-            ClimateEntityFeature.TURN_OFF
+            ClimateEntityFeature.TARGET_TEMPERATURE
         )
         
         self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
@@ -249,9 +247,7 @@ class SmartThermostat(ClimateEntity):
     def supported_features(self) -> ClimateEntityFeature:
         """Return the list of supported features."""
         features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE |
-            ClimateEntityFeature.TURN_ON |
-            ClimateEntityFeature.TURN_OFF
+            ClimateEntityFeature.TARGET_TEMPERATURE
         )
         return features
 
