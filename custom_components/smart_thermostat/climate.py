@@ -17,6 +17,8 @@ from collections import deque
 import asyncio
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.core import callback
+import voluptuous as vol
+import homeassistant.helpers.config_validation as cv
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +55,35 @@ async def async_setup_platform(hass: HomeAssistant, config: ConfigType, async_ad
     # Store the thermostat instance in hass.data
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
-    hass.data[DOMAIN][name] = thermostat  # Use name as the key since it's unique
+    hass.data[DOMAIN][name] = thermostat
+    
+    # Register custom services
+    async def handle_turn_on(call):
+        """Handle the custom turn_on service."""
+        entity_id = call.data.get('entity_id')
+        if entity_id and entity_id == thermostat.entity_id:
+            await thermostat.async_turn_on()
+
+    async def handle_turn_off(call):
+        """Handle the custom turn_off service."""
+        entity_id = call.data.get('entity_id')
+        if entity_id and entity_id == thermostat.entity_id:
+            await thermostat.async_turn_off()
+
+    # Register the services
+    hass.services.async_register(
+        DOMAIN, 'turn_on', handle_turn_on,
+        schema=vol.Schema({
+            vol.Required('entity_id'): cv.entity_id
+        })
+    )
+    
+    hass.services.async_register(
+        DOMAIN, 'turn_off', handle_turn_off,
+        schema=vol.Schema({
+            vol.Required('entity_id'): cv.entity_id
+        })
+    )
     
     async_add_entities([thermostat])
 
@@ -96,7 +126,9 @@ class SmartThermostat(ClimateEntity):
         
         # Add supported features
         self._attr_supported_features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE
+            ClimateEntityFeature.TARGET_TEMPERATURE |
+            ClimateEntityFeature.TURN_ON |
+            ClimateEntityFeature.TURN_OFF
         )
         
         self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
@@ -247,7 +279,9 @@ class SmartThermostat(ClimateEntity):
     def supported_features(self) -> ClimateEntityFeature:
         """Return the list of supported features."""
         features = (
-            ClimateEntityFeature.TARGET_TEMPERATURE
+            ClimateEntityFeature.TARGET_TEMPERATURE |
+            ClimateEntityFeature.TURN_ON |
+            ClimateEntityFeature.TURN_OFF
         )
         return features
 
@@ -422,15 +456,16 @@ class SmartThermostat(ClimateEntity):
     async def async_turn_on(self) -> None:
         """Turn the entity on."""
         self._system_enabled = True
-        # await self.async_set_hvac_mode(HVACMode.HEAT)
         self._hvac_mode = HVACMode.HEAT
         await self._check_outdoor_temperature()
         await self._control_heating()
+        self.async_write_ha_state()
 
     async def async_turn_off(self) -> None:
         """Turn the entity off."""
         self._system_enabled = False
         await self.async_set_hvac_mode(HVACMode.OFF)
+        self.async_write_ha_state()
 
     async def _check_outdoor_temperature(self):
         """Check outdoor temperature and select appropriate heat source."""

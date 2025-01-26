@@ -90,12 +90,12 @@ cards:
       {% endif %}
     tap_action:
       action: call-service
-      service: climate.turn_on
+      service: smart_thermostat.turn_on
       target:
         entity_id: climate.smart_furnace
     double_tap_action:
       action: call-service
-      service: climate.turn_off
+      service: smart_thermostat.turn_off
       target:
         entity_id: climate.smart_furnace
 
