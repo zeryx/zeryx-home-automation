@@ -27,13 +27,25 @@ logger:
 smartir:
 climate:
   - platform: smartir
-    name: "Heat pump"
-    unique_id: kitchen_heat_pump
+    name: "Primary HP"
+    unique_id: primary_hp
     device_code: 2161
-    controller_data: remote.hvac_controller
-    temperature_sensor: sensor.hvac_controller_temperature
-    humidity_sensor: sensor.hvac_controller_humidity
-    power_sensor: binary_sensor.ac_power
+    controller_data: remote.broadlink_primary
+    temperature_sensor: sensor.broadlink_primary_temperature
+    humidity_sensor: sensor.broadlink_primary_humidity
+  - platform:smartir
+    name: "Basement HP"
+    unique_id: basement_hp
+    device_code: 2161
+    controller_data: remote.broadlink_basement
+    temperature_sensor: sensor.basement_temperature
+    humidity_sensor: sensor.basement_humidity
+  - platform: smartir
+    name: "bedroom HP"
+    unique_id: bedroom_hp
+    device_code: 2161
+    controller_data: remote.broadlink_bedroom
+    temperature_sensor: sensor.bedroom_temperature
   - platform: smart_thermostat
     name: "Smart Furnace"
     temperature_sensors:
@@ -41,19 +53,17 @@ climate:
       - sensor.office_temperature
       - sensor.thermostat_current_temperature
       - sensor.hvac_controller_temperature
-    # hvac_entity: climate.mock_furnace_mock_furnace
-    # heat_pump_entity: climate.mock_heat_pump_mock_heat_pump
     hvac_entity: climate.thermostat
-    heat_pump_entity: climate.office_ac
+    heat_pump_entity: climate.primary_hp
     target_temp: 21.5
     min_temp: 19.0
-    max_temp: 22.5
+    max_temp: 25
     tolerance: 0.5
     minimum_on_time: 5
     maximum_on_time: 15
     off_time: 20
-    heat_pump_min_temp: 0
-    heat_pump_max_temp: 30
+    heat_pump_min_temp: -25
+    heat_pump_max_temp: 15
 
 frontend:
   themes: !include_dir_merge_named themes

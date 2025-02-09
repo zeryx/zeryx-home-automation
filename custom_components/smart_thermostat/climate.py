@@ -563,9 +563,6 @@ class SmartThermostat(ClimateEntity):
         elif 'temperature' in data:
             command_type = 'temperature'
             command_value = data['temperature']
-        elif 'fan_mode' in data:
-            command_type = 'fan_mode'
-            command_value = data['fan_mode']
         else:
             command_type = 'other'
             command_value = None
@@ -590,8 +587,6 @@ class SmartThermostat(ClimateEntity):
                 self._heat_pump_last_mode = command_value
             elif command_type == 'temperature':
                 self._heat_pump_last_temp = command_value
-            elif command_type == 'fan_mode':
-                self._heat_pump_last_fan = command_value
         elif entity_id == self._hvac_entity:
             if command_type == 'mode':
                 self._furnace_last_mode = command_value
@@ -599,11 +594,8 @@ class SmartThermostat(ClimateEntity):
                 self._furnace_last_temp = command_value
 
         self._add_action(f"State tracking updated - Last heat pump temp: {self._heat_pump_last_temp}, Last furnace temp: {self._furnace_last_temp}")
-        # Determine the correct service name
 
         domain = 'climate'
-        # if 'fan_mode' in data:
-        #     service = 'set_fan_mode'  # Ensure we use the correct service name for fan operations
         
         # Send the command
         try:
@@ -648,17 +640,6 @@ class SmartThermostat(ClimateEntity):
                     )
                     self._heat_pump_last_temp = 17  # Explicitly set last temp
                     self._add_action(f"Heat pump temperature set to 17°C (last_temp: {self._heat_pump_last_temp})")
-                    await asyncio.sleep(self._command_delay)
-
-                    # Then set to low fan
-                    await self._send_command(
-                        self._heat_pump_entity,
-                        'set_fan_mode',
-                        {'fan_mode': 'auto'}
-                    )
-                    self._heat_pump_last_fan = 'auto'  # Explicitly set last fan mode
-                    self._add_action(f"Heat pump fan set to auto (last_fan: {self._heat_pump_last_fan})")
-                    await asyncio.sleep(self._command_delay)
 
                     if self._force_mode:
                         self._cycle_status = "forced"
@@ -667,7 +648,6 @@ class SmartThermostat(ClimateEntity):
                     self._add_action(f"Warning: Failed to set heat pump minimum settings: {str(e)}")
 
                 # Turn on furnace
-                
                 self._active_heat_source = "furnace"
 
             elif source == "heat_pump":
@@ -693,25 +673,6 @@ class SmartThermostat(ClimateEntity):
         # Ensure state is written after switch
         self.async_write_ha_state()
         await self._hass.async_block_till_done()
-
-    async def _determine_optimal_fan_mode(self, current_temps: dict) -> str:
-        """Determine optimal fan mode based on temperature spread across sensors."""
-        if not current_temps:
-            return "auto"  # Default to auto if no sensor data available
-        
-        temp_spread = max(current_temps.values()) - min(current_temps.values())
-        avg_temp = sum(current_temps.values()) / len(current_temps)
-        temp_delta = abs(self._target_temperature - avg_temp)
-        
-        # If large temperature spread between sensors or far from target, use high
-        if temp_spread > 1.5 or temp_delta > 2.0:
-            return "high"
-        # If moderate spread or moderate distance from target, use mid
-        elif temp_spread > 0.8 or temp_delta > 1.0:
-            return "mid"
-        # Otherwise use low for efficiency
-        else:
-            return "low"
 
     async def _control_heating(self):
         """Control the heating based on temperature."""
@@ -755,34 +716,34 @@ class SmartThermostat(ClimateEntity):
 
     async def _control_heating_heat_pump(self, current_temp: float):
         """Control heat pump specific heating logic."""
-        # Only manage fan speed and basic state tracking
-        now = datetime.now()
-        
-        # Set heating state based on temperature conditions
         if self._hvac_mode == HVACMode.HEAT:
             if current_temp is not None:
+                # Calculate temperature difference
+                temp_diff = self._target_temperature - current_temp
+                
+                # Set heat pump temperature based on three states
+                if temp_diff > 0.5:  # Below setpoint by more than 0.5°C
+                    new_temp = self._max_temp
+                    status = "max heating"
+                elif abs(temp_diff) <= 0.5:  # Within 0.5°C of setpoint
+                    new_temp = self._target_temperature
+                    status = "maintaining"
+                else:  # Above setpoint
+                    new_temp = self._min_temp
+                    status = "minimum heating"
+                
+                # Send command only if temperature setting would change
+                if self._heat_pump_last_temp != new_temp:
+                    await self._send_command(
+                        self._heat_pump_entity,
+                        'set_temperature',
+                        {'temperature': new_temp}
+                    )
+                    self._add_action(f"Setting heat pump to {new_temp}°C ({status}) - current temp: {current_temp}°C")
+                
                 self._is_heating = True
                 self._hvac_action = HVACAction.HEATING
-        
-        # Check if it's time to adjust fan mode (using off_time as check interval)
-        should_check_fan = (
-            not hasattr(self, '_last_fan_check') or 
-            (now - getattr(self, '_last_fan_check')).total_seconds() >= self._off_time
-        )
-        
-        if should_check_fan and self._hvac_mode == HVACMode.HEAT:
-            self._last_fan_check = now
-            optimal_fan_mode = await self._determine_optimal_fan_mode(self._sensor_temperatures)
-            self._cycle_status = "heatpump active"
-            try:
-                await self._send_command(
-                    self._heat_pump_entity,
-                    'set_fan_mode',
-                    {'fan_mode': optimal_fan_mode}
-                )
-                self._add_action(f"Set heat pump fan mode to {optimal_fan_mode}")
-            except Exception as e:
-                self._add_action(f"Failed to set fan mode: {str(e)}")
+                self._cycle_status = f"heatpump {status}"
 
     async def _control_heating_furnace(self, current_temp: float):
         """Control furnace specific heating logic with cycles."""

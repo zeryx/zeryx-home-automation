@@ -200,7 +200,13 @@ cards:
         secondary: >
           {% set force = state_attr('climate.smart_furnace', 'force_mode') %}
           {% if force %}
-            {{ force|title }}
+            {% if force == 'heat_pump' %}
+              Heat Pump
+            {% elif force == 'furnace' %}
+              Furnace
+            {% else %}
+              {{ force|title }}
+            {% endif %}
           {% else %}
             Auto
           {% endif %}
