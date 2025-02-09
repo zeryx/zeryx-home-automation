@@ -49,10 +49,9 @@ climate:
   - platform: smart_thermostat
     name: "Smart Furnace"
     temperature_sensors:
-      - sensor.bedroom_temperature
-      - sensor.office_temperature
+      - sensor.broadlink_bedroom_temperature
       - sensor.thermostat_current_temperature
-      - sensor.hvac_controller_temperature
+      - sensor.broadlink_primary_temperature
     hvac_entity: climate.thermostat
     heat_pump_entity: climate.primary_hp
     target_temp: 21.5
