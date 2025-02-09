@@ -33,7 +33,7 @@ climate:
     controller_data: remote.broadlink_primary
     temperature_sensor: sensor.broadlink_primary_temperature
     humidity_sensor: sensor.broadlink_primary_humidity
-  - platform:smartir
+  - platform: smartir
     name: "Basement HP"
     unique_id: basement_hp
     device_code: 2161
